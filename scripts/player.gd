@@ -164,9 +164,6 @@ func interact() -> void:
 		"plate":
 			if held is Food:
 				var p: Plate = node
-				if not p.can_add():
-					game.toast("That plate is piled high enough")
-					return
 				var hf: Food = held
 				if is_topping(hf) and not p.items.is_empty():
 					if DB.is_dust(hf.data["id"]):
@@ -188,9 +185,6 @@ func interact() -> void:
 			var tf: Food = node
 			if held is Plate:
 				var p: Plate = held
-				if not p.can_add():
-					game.toast("That plate is piled high enough")
-					return
 				p.add_data(tf.data)
 				tf.queue_free()
 				game.sfx.play("plate", -8.0)
@@ -279,7 +273,7 @@ func _station_holding(st: Station) -> void:
 			var f: Food = held
 			if is_topping(held) and not st.contents.is_empty() and st.kind in ["pan", "pot", "fryer", "oven", "grill", "microwave", "bowl", "blender", "fridge"]:
 				# pour / sprinkle some in, keep the bottle
-				if st.contents.size() >= Station.CAP[st.kind]:
+				if st.is_full():
 					game.toast("The %s is full" % st.title())
 					return
 				var pf := Food.make(topping_leaf(f))

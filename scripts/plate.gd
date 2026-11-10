@@ -1,8 +1,7 @@
 class_name Plate
 extends RigidBody3D
-## A plate. Everything added becomes part of one combined dish model.
-
-const MAX_ITEMS := 12
+## A plate. No limit on how much goes on it. Fillings go into the bun/bread/wrap they were
+## plated with (a second bun starts a second burger); sides like fries sit next to it.
 
 var items: Array = [] # food data dicts
 var fit := 1.0
@@ -66,10 +65,6 @@ func leaves() -> Array:
 	return out
 
 
-func can_add() -> bool:
-	return leaves().size() < MAX_ITEMS
-
-
 func add_data(d: Dictionary) -> void:
 	DB.portion(d)
 	items.append(d)
@@ -110,10 +105,7 @@ func rebuild() -> void:
 		body = tops
 		tops = []
 	var b := Models.new(food_root)
-	if body.size() == 1:
-		b.build(body[0])
-	else:
-		b.build({"id": "mix", "parts": body})
+	_serve(b, body)
 	tints = b.tints
 	# keep big piles within the plate
 	var aabb := b._bounds()
@@ -129,6 +121,74 @@ func rebuild() -> void:
 		var tb := Models.new(food_root)
 		tb.top_coat(tops, 1.0 / fit)
 		tints.append_array(tb.tints)
+
+
+## Finished foods built inside a bun or wrap rather than served beside it.
+const FILLINGS := ["patty", "falafel", "fried_egg", "poached_egg", "scrambled_eggs", "meatballs", "hash_browns"]
+const SERVE_GAP := 0.02
+
+
+## Builds each serving and lines them up side by side across the plate.
+func _serve(b: Models, body: Array) -> void:
+	var groups := servings(body)
+	var x := 0.0
+	for g: Array in groups:
+		var start := food_root.get_child_count()
+		b.build(g[0] if g.size() == 1 else {"id": "mix", "parts": g})
+		if groups.size() == 1:
+			return
+		var bb := _bounds_from(start)
+		var shift := Vector3(x - bb.position.x, 0.0, -bb.get_center().z)
+		for i in range(start, food_root.get_child_count()):
+			(food_root.get_child(i) as Node3D).position += shift
+		x += bb.size.x + SERVE_GAP
+	var centre := Vector3((x - SERVE_GAP) * 0.5, 0.0, 0.0)
+	for c in food_root.get_children():
+		(c as Node3D).position -= centre
+
+
+func _bounds_from(start: int) -> AABB:
+	var out := AABB()
+	for i in range(start, food_root.get_child_count()):
+		var mi := food_root.get_child(i) as MeshInstance3D
+		if mi == null:
+			continue
+		var bb: AABB = mi.transform * mi.get_aabb()
+		out = bb if i == start else out.merge(bb)
+	return out
+
+
+## Splits plated leaves into servings. Without a bun/bread/wrap it's one dish (a pile, soup...).
+## Otherwise each frame takes the fillings plated after it (fillings plated before the first
+## frame go in the first), and sides (fries, mash, rice, pasta...) become their own serving.
+static func servings(body: Array) -> Array:
+	if not Models.has_frame(body):
+		return [body]
+	var groups := []
+	var early := []
+	var sides := []
+	for l: Dictionary in body:
+		if Models.has_frame([l]):
+			groups.append(early + [l] if groups.is_empty() else [l])
+			early = []
+		elif is_side(l):
+			sides.append(l)
+		elif groups.is_empty():
+			early.append(l)
+		else:
+			(groups[-1] as Array).append(l)
+	if not sides.is_empty():
+		groups.append(sides)
+	return groups
+
+
+## Served next to a sandwich rather than inside it.
+static func is_side(l: Dictionary) -> bool:
+	var id: String = l["id"]
+	if id == "mix" or id in FILLINGS or DB.is_topping(id):
+		return false
+	return DB.ING[id][1] in ["made", "grain", "sweet"]
+
 
 
 func display_name() -> String:
