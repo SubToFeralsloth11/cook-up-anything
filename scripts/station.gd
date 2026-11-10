@@ -6,11 +6,19 @@ extends StaticBody3D
 
 const NAMES := {"trash": "Bin", "sink": "Sink", "board": "Chopping Board", "bowl": "Mixing Bowl",
 	"blender": "Blender", "pan": "Frying Pan", "pot": "Pot", "fryer": "Deep Fryer", "oven": "Oven",
-	"plates": "Plates", "serve": "Serving Pass"}
-const CAP := {"sink": 3, "board": 1, "bowl": 8, "blender": 6, "pan": 6, "pot": 8, "fryer": 4, "oven": 6}
-const SPREAD := {"sink": 0.1, "bowl": 0.07, "blender": 0.03, "pan": 0.075, "pot": 0.065, "fryer": 0.07, "oven": 0.13}
-const ITEM_SCALE := {"bowl": 0.8, "blender": 0.55, "pot": 0.62, "fryer": 0.75, "pan": 0.85, "sink": 0.9}
-const METHOD := {"pan": "fry", "pot": "boil", "fryer": "deepfry", "oven": "bake"}
+	"plates": "Plates", "serve": "Serving Pass", "grill": "Grill", "microwave": "Microwave",
+	"toaster": "Toaster", "fridge": "Fridge & Freezer"}
+const CAP := {"sink": 3, "board": 1, "bowl": 8, "blender": 6, "pan": 6, "pot": 8, "fryer": 4, "oven": 6,
+	"grill": 6, "microwave": 4, "toaster": 2, "fridge": 6}
+const SPREAD := {"sink": 0.1, "bowl": 0.07, "blender": 0.03, "pan": 0.075, "pot": 0.065, "fryer": 0.07, "oven": 0.13,
+	"grill": 0.1, "microwave": 0.07, "toaster": 0.0, "fridge": 0.1}
+const ITEM_SCALE := {"bowl": 0.8, "blender": 0.55, "pot": 0.62, "fryer": 0.75, "pan": 0.85, "sink": 0.9,
+	"grill": 0.85, "microwave": 0.6, "toaster": 0.7, "fridge": 0.6}
+const METHOD := {"pan": "fry", "pot": "boil", "fryer": "deepfry", "oven": "bake", "grill": "grill",
+	"microwave": "microwave", "toaster": "toast", "fridge": "chill"}
+## What fits in a toaster slot.
+const TOASTABLE := ["bread", "bread_loaf", "baguette", "bun", "brioche_bun", "bagel", "english_muffin", "crumpet",
+	"waffle", "croissant", "pita", "naan", "toast", "hot_dog_bun", "tortilla"]
 const CHOPS := 4
 const WHISKS := 6
 const BLEND_TIME := 2.4
@@ -30,6 +38,9 @@ var toss_t := 0.0
 var warn_t := 0.0
 var door_open := false
 var door_close_t := 0.0
+var pending_style := ""
+var popped := false
+var frozen_once := false
 
 var bar: Node3D
 var bar_fill: MeshInstance3D
@@ -69,6 +80,10 @@ func _bar_height() -> float:
 		"fryer": return 0.55
 		"pot": return 0.48
 		"sink": return 0.42
+		"microwave": return 0.48
+		"toaster": return 0.36
+		"fridge": return 0.72
+		"grill": return 0.36
 	return 0.38
 
 
@@ -524,6 +539,129 @@ func _build_serve() -> void:
 	_box_col(Vector3(1.0, 0.35, 0.5), Vector3(0, 0.17, 0))
 
 
+func _build_grill() -> void:
+	# Countertop griddle grill: black body, ridged cast-iron plate, glowing coals underneath.
+	var iron := Tex.mat("cast_iron")
+	var w := 0.56
+	var d := 0.38
+	_s(self, "box", Tex.mat("black"), Vector3(0, 0.05, 0), Vector3(w, 0.1, d))
+	_s(self, "box", Tex.mat("steel"), Vector3(0, 0.1, d / 2 - 0.02), Vector3(w, 0.04, 0.04))
+	for i in 2:
+		_s(self, "cyl", Tex.mat("black"), Vector3(-0.18 + i * 0.36, 0.06, d / 2 + 0.01), Vector3(0.04, 0.02, 0.04), Vector3(90, 0, 0))
+	var heat := Models.glow_mat(Color(1.0, 0.35, 0.08), 0.0)
+	liquid_mat = heat
+	var coals := _s(self, "box", heat, Vector3(0, 0.105, -0.02), Vector3(w - 0.08, 0.01, d - 0.1))
+	coals.set_meta("nobatch", true)
+	for i in 11:
+		_s(self, "box", iron, Vector3(-w / 2 + 0.05 + i * (w - 0.1) / 10.0, 0.125, -0.02), Vector3(0.016, 0.02, d - 0.08))
+	_s(self, "box", iron, Vector3(0, 0.117, -d / 2 + 0.03), Vector3(w - 0.06, 0.03, 0.02))
+	var l := OmniLight3D.new()
+	l.light_color = Color(1.0, 0.5, 0.25)
+	l.omni_range = 0.7
+	l.light_energy = 0.0
+	l.position.y = 0.2
+	l.set_meta("nobatch", true)
+	add_child(l)
+	glow = l
+	hold.position = Vector3(0, 0.135, -0.02)
+	_particles("sizzle", Vector3(0, 0.16, 0), false)
+	_particles("smoke", Vector3(0, 0.2, 0), false)
+	loop = game.sfx.loop_player("sizzle", self, -7.0)
+	_box_col(Vector3(w, 0.2, d), Vector3(0, 0.1, 0))
+
+
+func _build_microwave() -> void:
+	var w := 0.5
+	var h := 0.3
+	var d := 0.36
+	var steel := Tex.mat("steel")
+	var black := Tex.mat("black")
+	_s(self, "box", steel, Vector3(0, h - 0.01, 0), Vector3(w, 0.02, d))
+	_s(self, "box", steel, Vector3(0, 0.01, 0), Vector3(w, 0.02, d))
+	_s(self, "box", steel, Vector3(-w / 2 + 0.01, h / 2, 0), Vector3(0.02, h, d))
+	_s(self, "box", steel, Vector3(w / 2 - 0.01, h / 2, 0), Vector3(0.02, h, d))
+	_s(self, "box", steel, Vector3(0, h / 2, -d / 2 + 0.01), Vector3(w, h, 0.02))
+	_s(self, "box", black, Vector3(w / 2 - 0.07, h / 2, 0), Vector3(0.12, h - 0.03, d - 0.02))
+	for i in 6:
+		_s(self, "box", Tex.mat("chrome"), Vector3(w / 2 - 0.07, 0.24 - i * 0.03, d / 2 - 0.005), Vector3(0.06, 0.012, 0.004))
+	var inside := Tex.tinted("plaster", Color(0.92, 0.9, 0.85))
+	_s(self, "box", inside, Vector3(-0.07, h / 2, -d / 2 + 0.025), Vector3(w - 0.17, h - 0.05, 0.01))
+	_s(self, "cyl", Tex.mat("glass"), Vector3(-0.07, 0.03, 0.0), Vector3(0.26, 0.008, 0.26))
+	door = _dyn()
+	door.position = Vector3(-w / 2 + 0.005, h / 2, d / 2 + 0.005)
+	var glass := Tex.mat("glass").duplicate() as StandardMaterial3D
+	glass.albedo_color = Color(0.08, 0.08, 0.08, 0.5)
+	_s(door, "box", black, Vector3((w - 0.14) / 2, 0, 0), Vector3(w - 0.14, h - 0.02, 0.02))
+	_s(door, "box", glass, Vector3((w - 0.14) / 2, 0, 0.012), Vector3(w - 0.22, h - 0.09, 0.004))
+	_s(door, "box", Tex.mat("chrome"), Vector3(w - 0.17, 0, 0.03), Vector3(0.015, h - 0.1, 0.02))
+	var l := OmniLight3D.new()
+	l.light_color = Color(1.0, 0.9, 0.6)
+	l.omni_range = 0.4
+	l.light_energy = 0.0
+	l.position = Vector3(-0.07, h - 0.06, 0)
+	l.set_meta("nobatch", true)
+	add_child(l)
+	glow = l
+	hold.position = Vector3(-0.07, 0.04, 0.0)
+	loop = game.sfx.loop_player("hum", self, -8.0)
+	_box_col(Vector3(w, h, d), Vector3(0, h / 2, 0))
+
+
+func _build_toaster() -> void:
+	var steel := Tex.mat("chrome")
+	_s(self, "box", steel, Vector3(0, 0.1, 0), Vector3(0.28, 0.18, 0.17))
+	_s(self, "box", Tex.mat("black"), Vector3(0, 0.005, 0), Vector3(0.3, 0.01, 0.19))
+	for sz in [-0.035, 0.035]:
+		_s(self, "box", Tex.mat("black"), Vector3(0, 0.19, sz), Vector3(0.2, 0.004, 0.028))
+	_s(self, "box", Tex.mat("black"), Vector3(0.15, 0.13, 0), Vector3(0.02, 0.025, 0.03))
+	var heat := Models.glow_mat(Color(1.0, 0.4, 0.1), 0.0)
+	liquid_mat = heat
+	for sz in [-0.035, 0.035]:
+		var e := _s(self, "box", heat, Vector3(0, 0.192, sz), Vector3(0.18, 0.002, 0.022))
+		e.set_meta("nobatch", true)
+	var l := OmniLight3D.new()
+	l.light_color = Color(1.0, 0.5, 0.2)
+	l.omni_range = 0.4
+	l.light_energy = 0.0
+	l.position.y = 0.25
+	l.set_meta("nobatch", true)
+	add_child(l)
+	glow = l
+	hold.position = Vector3(0, 0.16, 0)
+	loop = game.sfx.loop_player("hum", self, -12.0)
+	_box_col(Vector3(0.3, 0.2, 0.19), Vector3(0, 0.1, 0))
+
+
+func _build_fridge() -> void:
+	# Countertop fridge-freezer with a glass door and a frosty blue light.
+	var w := 0.5
+	var h := 0.56
+	var d := 0.44
+	var white := Tex.tinted("plaster", Color(0.95, 0.96, 0.97))
+	_s(self, "box", white, Vector3(0, h - 0.015, 0), Vector3(w, 0.03, d))
+	_s(self, "box", white, Vector3(0, 0.015, 0), Vector3(w, 0.03, d))
+	_s(self, "box", white, Vector3(-w / 2 + 0.015, h / 2, 0), Vector3(0.03, h, d))
+	_s(self, "box", white, Vector3(w / 2 - 0.015, h / 2, 0), Vector3(0.03, h, d))
+	_s(self, "box", Tex.mat("fridge_inside"), Vector3(0, h / 2, -d / 2 + 0.015), Vector3(w, h, 0.03))
+	_s(self, "box", Tex.mat("glass"), Vector3(0, 0.2, 0), Vector3(w - 0.06, 0.008, d - 0.06))
+	_s(self, "box", Models.glow_mat(Color(0.6, 0.85, 1.0), 1.5), Vector3(0, h - 0.035, 0), Vector3(w - 0.1, 0.006, 0.04))
+	door = _dyn()
+	door.position = Vector3(-w / 2, h / 2, d / 2 + 0.01)
+	_s(door, "box", Tex.mat("glass_fridge"), Vector3(w / 2, 0, 0), Vector3(w, h, 0.016))
+	_s(door, "box", Tex.mat("chrome"), Vector3(w - 0.04, 0, 0.025), Vector3(0.016, h * 0.6, 0.02))
+	var cold := OmniLight3D.new()
+	cold.light_color = Color(0.75, 0.9, 1.0)
+	cold.omni_range = 0.6
+	cold.light_energy = 0.6
+	cold.position = Vector3(0, h - 0.1, 0.05)
+	cold.set_meta("nobatch", true)
+	add_child(cold)
+	hold.position = Vector3(0, 0.21, 0)
+	_particles("steam", Vector3(0, 0.3, d / 2), false)
+	_box_col(Vector3(w, h, d), Vector3(0, h / 2, 0))
+
+
+
 # ================================================================ interaction
 
 func accepts(f: Food) -> String:
@@ -542,10 +680,22 @@ func accepts(f: Food) -> String:
 				return "Can't chop a mixture"
 			if DB.cut_max(f.data["id"]) <= int(f.data.get("cut", 0)):
 				return "Can't chop that any more"
+		"toaster":
+			if f.data["id"] == "mix" or not f.data["id"] in TOASTABLE:
+				return "Only bread and bakes fit in the toaster"
+			if f.data["id"] in ["bread", "bread_loaf", "baguette"] and int(f.data.get("cut", 0)) == 0:
+				return "Slice it first - a whole loaf won't fit"
 	return ""
 
 
 func add_food(f: Food) -> void:
+	if not kind in ["sink", "board"] and DB.is_pack(f.data["id"]) and not f.data.get("portion", false):
+		DB.portion(f.data)
+		f.rebuild()
+		f.mark_changed()
+	pending_style = ""
+	popped = false
+	frozen_once = false
 	f.reparent(hold, true)
 	f.set_carried(true)
 	contents.append(f)
@@ -564,9 +714,16 @@ func add_food(f: Food) -> void:
 		"pan":
 			game.sfx.play_at("sizzle_hit", at, -2.0)
 			(fx["sizzle"] as CPUParticles3D).restart()
-		"oven":
+		"oven", "microwave", "fridge":
 			_swing_door(true)
 			game.sfx.play_at("place_wood", at, -4.0)
+		"toaster":
+			game.sfx.play_at("click", at, -2.0)
+			for c in contents:
+				var tw := (c as Food).create_tween()
+				tw.tween_property(c, "position:y", -0.06, 0.25).set_delay(0.15)
+		"grill":
+			game.sfx.play_at("sizzle_hit", at, -2.0)
 		"board":
 			game.sfx.play_at("place_wood", at, -2.0)
 		_:
@@ -595,7 +752,7 @@ func _layout() -> void:
 
 ## Should taking from this station merge the contents into one dish?
 func _merges() -> bool:
-	return contents.size() > 1 and done_once and method != ""
+	return contents.size() > 1 and done_once and method != "" and not kind in ["fridge", "toaster"]
 
 
 func take() -> Node3D:
@@ -614,7 +771,10 @@ func take() -> Node3D:
 	else:
 		f = contents.pop_back()
 	done_once = false
-	if kind == "oven":
+	pending_style = ""
+	popped = false
+	frozen_once = false
+	if kind in ["oven", "microwave", "fridge"]:
 		_swing_door(true)
 	_layout()
 	_after_change()
@@ -668,22 +828,36 @@ func use() -> String:
 func use_label() -> String:
 	match kind:
 		"board":
-			return "Chop" if not contents.is_empty() else ""
+			if contents.is_empty():
+				return ""
+			var f: Food = contents[0]
+			if int(f.data.get("cut", 0)) == 0 and DB.has_styles(f.data["id"]) and pending_style == "":
+				return "Cut (choose how)"
+			return {"slice": "Slice", "dice": "Dice", "mince": "Mince"}.get(pending_style, "Chop")
 		"bowl":
-			return "Whisk" if not contents.is_empty() else ""
+			return "Whisk / Bread" if not contents.is_empty() else ""
 		"blender":
 			return "Blend" if not contents.is_empty() and not running else ""
 	return ""
 
 
-func _chop() -> String:
+## Called by the cut menu. "free" opens the hand-cut pad.
+func choose_style(style: String) -> void:
 	if contents.is_empty():
-		return "Put something on the board"
+		return
+	if style == "free":
+		game.ui.open_free_cut(self, contents[0])
+		return
+	pending_style = style
+	work = 0
+	_chop()
+
+
+## Knife animation + chop sound + bits (shared by every cutting mode).
+func knife_chop() -> void:
+	if contents.is_empty():
+		return
 	var f: Food = contents[0]
-	var cut: int = f.data.get("cut", 0)
-	if cut >= DB.cut_max(f.data["id"]):
-		return "Can't chop that any more"
-	work += 1
 	game.sfx.play_at("chop", global_position, 0.0, 0.15)
 	var tw := knife.create_tween()
 	knife.rotation_degrees = Vector3(0, 35, -22)
@@ -703,15 +877,61 @@ func _chop() -> String:
 	get_tree().create_timer(1.2).timeout.connect(bits.queue_free)
 	f.pop(1.06)
 	game.cam_shake(0.004)
-	if work >= CHOPS:
-		work = 0
-		f.data["cut"] = cut + 1
-		f.rebuild()
-		f.mark_changed()
-		f.pop(1.2)
-		game.sfx.play_at("pop", global_position, -4.0)
-		game.float_text(global_position + Vector3(0, 0.3, 0), f.display_name(), Color(0.7, 0.9, 1.0))
-	_set_bar(float(work) / CHOPS, Color(0.45, 0.75, 1.0), "Chop" if work > 0 else "")
+
+
+## Applies a finished hand cut: `pieces` chunks (lots of strokes = minced).
+func apply_free_cut(pieces: int) -> void:
+	if contents.is_empty() or pieces < 2:
+		return
+	var f: Food = contents[0]
+	if pieces >= 18:
+		f.data["cut"] = 2
+		f.data["style"] = ""
+	else:
+		f.data["cut"] = 1
+		f.data["style"] = "slice" if pieces <= 3 and DB.LOOK.get(f.data["id"], f.data["id"]) in ["bread", "baguette"] else "free"
+		f.data["pieces"] = pieces
+	_finish_cut(f)
+
+
+func _finish_cut(f: Food) -> void:
+	work = 0
+	pending_style = ""
+	f.rebuild()
+	f.mark_changed()
+	f.pop(1.2)
+	game.sfx.play_at("pop", global_position, -4.0)
+	game.float_text(global_position + Vector3(0, 0.3, 0), f.display_name(), Color(0.7, 0.9, 1.0))
+	_hide_bar()
+
+
+func _chop() -> String:
+	if contents.is_empty():
+		return "Put something on the board"
+	var f: Food = contents[0]
+	var cut: int = f.data.get("cut", 0)
+	if cut >= DB.cut_max(f.data["id"]):
+		return "Can't chop that any more"
+	if cut == 0 and DB.has_styles(f.data["id"]) and pending_style == "":
+		game.ui.open_cut_menu(self)
+		return ""
+	work += 1
+	knife_chop()
+	var need := CHOPS * (2 if pending_style == "mince" else 1)
+	if work >= need:
+		match pending_style:
+			"slice", "dice":
+				f.data["cut"] = 1
+				f.data["style"] = pending_style
+			"mince":
+				f.data["cut"] = 2
+				f.data["style"] = ""
+			_:
+				f.data["cut"] = cut + 1
+				f.data["style"] = ""
+		_finish_cut(f)
+		return ""
+	_set_bar(float(work) / need, Color(0.45, 0.75, 1.0), String(use_label()))
 	return ""
 
 
@@ -731,9 +951,16 @@ func _whisk() -> String:
 		var datas := []
 		for c in contents:
 			datas.append(c.data)
-		var res := DB.apply_rules("mix", datas)
-		var items: Array = res["made"] + res["rest"]
-		_replace([DB.merge(items, "mix")])
+		var co := DB.coat(datas)
+		if not (co["coated"] as Array).is_empty():
+			# breading station: coated pieces stay separate, leftovers mix as usual
+			var res2 := DB.apply_rules("mix", co["rest"])
+			var left: Array = res2["made"] + res2["rest"]
+			_replace(co["coated"] + ([DB.merge(left, "mix")] if not left.is_empty() else []))
+		else:
+			var res := DB.apply_rules("mix", datas)
+			var items: Array = res["made"] + res["rest"]
+			_replace([DB.merge(items, "mix")])
 		game.sfx.play_at("sparkle", global_position, -4.0)
 		_burst("sparkle")
 		game.float_text(global_position + Vector3(0, 0.35, 0), (contents[0] as Food).display_name(), Color(1, 0.9, 0.55))
@@ -771,7 +998,8 @@ func _swing_door(open: bool) -> void:
 	if open:
 		door_close_t = 0.9
 	var tw := door.create_tween()
-	tw.tween_property(door, "rotation_degrees:x", 80.0 if open else 0.0, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	var side := kind in ["microwave", "fridge"]
+	tw.tween_property(door, "rotation_degrees:y" if side else "rotation_degrees:x", (-100.0 if side else 80.0) if open else 0.0, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 	if not open:
 		game.sfx.play_at("door_close", global_position, -4.0)
 	else:
@@ -807,8 +1035,10 @@ func _process(delta: float) -> void:
 			_tick_sink(delta)
 		"blender":
 			_tick_blender(delta)
-		"pan", "pot", "fryer", "oven":
+		"pan", "pot", "fryer", "oven", "grill", "microwave", "toaster":
 			_tick_cook(delta)
+		"fridge":
+			_tick_cold(delta)
 
 
 func _tick_sink(delta: float) -> void:
@@ -892,13 +1122,19 @@ func _heat(on: bool) -> void:
 		liquid_mat.emission_energy_multiplier = 2.5 if on else 0.0
 	if kind == "fryer":
 		liquid_mat.emission_energy_multiplier = 0.25 if on else 0.0
+	if kind in ["grill", "toaster"]:
+		liquid_mat.emission_energy_multiplier = 2.2 if on else 0.0
 	if not on and fx.has("smoke"):
 		(fx["smoke"] as CPUParticles3D).emitting = false
 
 
 func _tick_cook(delta: float) -> void:
-	if contents.is_empty() or (kind == "oven" and door_open):
+	if contents.is_empty() or (kind in ["oven", "microwave"] and door_open):
 		_heat(false)
+		return
+	if kind == "toaster" and popped:
+		_heat(false)
+		_set_bar(1.0, Color(0.4, 0.95, 0.5), "Popped!")
 		return
 	_heat(true)
 	var min_p := 99.0
@@ -940,6 +1176,13 @@ func _tick_cook(delta: float) -> void:
 	if min_p >= 1.0 and not done_once:
 		done_once = true
 		_transform()
+		if kind == "toaster":
+			popped = true
+			game.sfx.play_at("pop", global_position, 0.0)
+			for c in contents:
+				var tw := (c as Food).create_tween()
+				tw.tween_property(c, "position:y", 0.09, 0.12).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+				tw.tween_property(c, "position:y", 0.05, 0.2)
 	if fx.has("smoke"):
 		(fx["smoke"] as CPUParticles3D).emitting = can_burn and max_p > 1.45
 	if any_burnt:
@@ -958,7 +1201,61 @@ func _tick_cook(delta: float) -> void:
 
 
 func _verb() -> String:
-	return {"fry": "Frying", "boil": "Boiling", "bake": "Baking", "deepfry": "Frying"}[method]
+	return {"fry": "Frying", "boil": "Boiling", "bake": "Baking", "deepfry": "Frying", "grill": "Grilling",
+		"microwave": "Zapping", "toast": "Toasting"}[method]
+
+
+## Fridge: chills, then (if left in) freezes. Never burns.
+func _tick_cold(delta: float) -> void:
+	if contents.is_empty() or door_open:
+		_hide_bar()
+		return
+	var min_p := 99.0
+	for c in contents:
+		var f: Food = c
+		var changed := false
+		for l in DB.leaves(f.data):
+			if l.get("pm", "") != "chill":
+				l["pm"] = "chill"
+				l["prog"] = 0.0
+			var p: float = minf(l["prog"] + delta / DB.cook_time(l, "chill"), 2.05)
+			l["prog"] = p
+			var want: String = "freeze" if p >= 2.0 else ("chill" if p >= 1.0 else l.get("cold", ""))
+			if want != l.get("cold", ""):
+				l["cold"] = want
+				changed = true
+			min_p = minf(min_p, p)
+		if changed:
+			f.mark_changed()
+	if min_p >= 1.0 and not done_once:
+		done_once = true
+		_cold_rules("chill")
+	if min_p >= 2.0 and not frozen_once:
+		frozen_once = true
+		_cold_rules("freeze")
+	if min_p >= 2.0:
+		_set_bar(1.0, Color(0.6, 0.85, 1.0), "Frozen")
+	elif min_p >= 1.0:
+		_set_bar(min_p - 1.0, Color(0.55, 0.8, 1.0), "Chilled - freezing %d%%" % int((min_p - 1.0) * 100))
+	else:
+		_set_bar(min_p, Color(0.7, 0.9, 1.0), "Chilling %d%%" % int(min_p * 100))
+
+
+func _cold_rules(m: String) -> void:
+	var datas := []
+	for c in contents:
+		datas.append(c.data)
+	var res := DB.apply_rules(m, datas)
+	if not (res["made"] as Array).is_empty():
+		_replace(res["made"] + res["rest"])
+		for c in contents:
+			for l in DB.leaves((c as Food).data):
+				l["pm"] = "chill"
+				l["prog"] = 2.05 if m == "freeze" else 1.0
+		game.float_text(global_position + Vector3(0, 0.5, 0), (contents[0] as Food).display_name(), Color(0.7, 0.9, 1.0))
+		_burst("sparkle")
+		game.sfx.play_at("sparkle", global_position, -4.0)
+	game.sfx.play_at("ding", global_position, -6.0)
 
 
 func _animate_cooking(delta: float) -> void:
@@ -976,6 +1273,21 @@ func _animate_cooking(delta: float) -> void:
 				var ptw := pan_node.create_tween()
 				ptw.tween_property(pan_node, "rotation_degrees:z", -5.0, 0.1)
 				ptw.tween_property(pan_node, "rotation_degrees:z", 0.0, 0.3).set_trans(Tween.TRANS_ELASTIC).set_ease(Tween.EASE_OUT)
+				(fx["sizzle"] as CPUParticles3D).restart()
+				game.sfx.play_at("sizzle_hit", global_position, -8.0)
+		"microwave":
+			hold.rotation.y += delta * 1.4
+		"grill":
+			toss_t += delta
+			if toss_t > 3.2:
+				toss_t = 0.0
+				for c in contents:
+					var f: Food = c
+					var tw := f.create_tween()
+					tw.tween_property(f, "position:y", 0.06, 0.14)
+					tw.parallel().tween_property(f, "rotation:z", f.rotation.z + PI, 0.28)
+					tw.tween_property(f, "position:y", 0.0, 0.14)
+					tw.tween_property(f, "rotation:z", 0.0, 0.0)
 				(fx["sizzle"] as CPUParticles3D).restart()
 				game.sfx.play_at("sizzle_hit", global_position, -8.0)
 		"pot", "fryer":

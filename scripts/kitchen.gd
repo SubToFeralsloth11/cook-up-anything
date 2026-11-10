@@ -38,12 +38,15 @@ func build() -> void:
 	_station("board", Vector3(0.0, TOP, -D + 0.38), 0.0)
 	_station("bowl", Vector3(0.8, TOP, -D + 0.36), 0.0)
 	_station("blender", Vector3(1.55, TOP, -D + 0.28), 0.0)
+	_station("toaster", Vector3(2.35, TOP, -D + 0.36), 0.0)
 	_station("trash", Vector3(3.68, 0, -D + 0.35), 0.0)
 	_upper_cabinets(_frame(Vector3(1.1, 0, -D), 0.0), 4.2)
 	_backsplash(Vector3(0.1, 0, -D), 6.2, 0.0)
 	_spice_shelf(Vector3(2.55, 1.15, -D + 0.1))
-	_fridge(Vector3(-4.48, 0, -D + 0.4))
+	_fridge(Vector3(-4.48, 0, -D + 0.4), 0.0, "FRESH", FRESH_ROWS)
+	_fridge(Vector3(-W + 0.4, 0, 3.15), 90.0, "DAIRY", DAIRY_ROWS)
 	_pantry(Vector3(-3.45, 0, -D + 0.22))
+	_dry_goods(Vector3(3.35, 0, D - 0.22))
 	# ---- left wall (x = -W), facing +x; local +x runs towards -z
 	var left_x := -W + 0.32
 	_cabinets(_frame(Vector3(left_x, 0, -2.275), 90.0), 0.0, 1.25, "marble")
@@ -60,11 +63,14 @@ func build() -> void:
 	var right_x := W - 0.32
 	_cabinets(_frame(Vector3(right_x, 0, -0.75), -90.0), 0.0, 4.1, "marble")
 	_station("plates", Vector3(right_x + 0.02, TOP, -2.3), -90.0)
+	_station("microwave", Vector3(right_x + 0.04, TOP, -1.5), -90.0)
+	_station("fridge", Vector3(right_x + 0.04, TOP, 0.9), -90.0)
 	_upper_cabinets(_frame(Vector3(W, 0, -1.1), -90.0), 3.2)
 	_backsplash(Vector3(W, 0, -0.75), 4.1, -90.0)
 	_hatch(Vector3(W, 0, 2.0))
 	# ---- island
 	_island(Vector3(0, 0, 0.35))
+	_station("grill", Vector3(-0.92, TOP, -0.02), 0.0)
 	# ---- produce stand on the front wall
 	_produce_stand(Vector3(0, 0, D))
 	_decor()
@@ -213,7 +219,7 @@ func _room() -> void:
 		_box(door, skirt, Vector3(sx, 1.03, 0.02), Vector3(0.06, 2.12, 0.05))
 	Models.solid(door, "sphere", Tex.mat("brass"), Vector3(0.36, 1.0, 0.08), Vector3.ONE * 0.06)
 	_clock(Vector3(0, 2.25, D - 0.02))
-	_chalkboard(Vector3(3.3, 1.55, D - 0.02))
+	_chalkboard(Vector3(W - 0.02, 1.55, 3.1))
 
 
 func _wall(pos: Vector3, size: Vector3, mat: Material) -> void:
@@ -346,9 +352,44 @@ func _spice_shelf(pos: Vector3) -> void:
 		_source(f, ids[i], Vector3(-0.51 + i * 0.17, 0.0125, 0.05), Vector3(0.15, 0.16, 0.12))
 
 
-func _fridge(pos: Vector3) -> void:
-	# Glass-door commercial fridge: meat, fish, dairy and chilled goods.
-	var f := _frame(pos, 0.0)
+const FRESH_ROWS := [
+	["chicken", "chicken_breast", "chicken_wings", "beef", "ground_beef", "pork_chop", "pork_mince", "pork_belly"],
+	["ribs", "lamb_chop", "lamb_mince", "duck", "turkey", "bacon", "sausage", "frankfurter"],
+	["chorizo", "ham", "prosciutto", "salami", "pepperoni", "turkey_slices", "salmon", "white_fish"],
+	["tuna", "smoked_salmon", "shrimp", "crab", "squid", "mussels", "tofu"],
+]
+const DAIRY_ROWS := [
+	["egg", "milk", "buttermilk", "butter", "cheese"],
+	["mozzarella", "parmesan", "feta", "halloumi", "brie"],
+	["blue_cheese", "goat_cheese", "cream_cheese", "ricotta", "sour_cream"],
+	["cream", "yogurt", "ice_cream", "condensed_milk"],
+]
+const PANTRY_ROWS := [
+	["bread", "bun", "brioche_bun", "hot_dog_bun", "bagel", "croissant", "baguette", "english_muffin"],
+	["pita", "naan", "tortilla", "taco_shell", "waffle", "crumpet", "puff_pastry", "rice_paper"],
+	["wonton_wrappers", "crackers", "biscuits", "pasta", "penne", "macaroni", "lasagne_sheets", "noodles"],
+	["rice_noodles", "nori", "flour", "cornflour", "sugar", "brown_sugar", "icing_sugar", "rice"],
+	["couscous", "quinoa", "lentils", "oats", "granola", "cereal", "breadcrumbs", "panko"],
+]
+const DRY_ROWS := [
+	["canned_tuna", "anchovies", "chickpeas", "beans", "black_beans", "kidney_beans", "canned_tomatoes", "sweetcorn", "peanuts", "almonds", "walnuts", "cashews"],
+	["raisins", "coconut_flakes", "tea", "coffee", "gelatin", "yeast", "oregano", "paprika", "cumin", "chili_flakes", "garlic_powder", "garam_masala"],
+	["turmeric", "cajun", "nutmeg", "sesame_seeds", "oil", "olive_oil", "sesame_oil", "vinegar", "balsamic", "soy_sauce", "fish_sauce", "worcestershire"],
+	["hoisin", "teriyaki", "sweet_chili", "hot_sauce", "ketchup", "mustard", "bbq_sauce", "sriracha", "ranch", "mayonnaise", "tomato_paste", "broth"],
+	["coconut_milk", "peanut_butter", "tahini", "miso", "gochujang", "curry_paste", "pickles", "olives", "capers", "honey", "chocolate", "white_chocolate"],
+	["cocoa", "choc_spread", "maple_syrup", "golden_syrup", "jam", "marshmallow", "gummy_bears"],
+]
+const PRODUCE_ROWS := [
+	["tomato", "cherry_tomato", "onion", "red_onion", "shallot", "garlic", "potato", "sweet_potato", "carrot", "beetroot", "radish", "lettuce", "cucumber", "bell_pepper", "green_pepper", "yellow_pepper", "chili"],
+	["jalapeno", "mushroom", "broccoli", "cauliflower", "spinach", "kale", "cabbage", "red_cabbage", "bok_choy", "corn", "zucchini", "eggplant", "pumpkin", "butternut", "scallion", "leek", "celery"],
+	["asparagus", "green_beans", "peas", "ginger", "basil", "mint", "parsley", "cilantro", "rosemary", "avocado", "lemon", "lime", "apple", "green_apple", "pear", "peach", "plum"],
+	["banana", "strawberry", "raspberry", "blueberry", "cherry", "grapes", "orange", "grapefruit", "pineapple", "mango", "kiwi", "watermelon", "coconut", "pomegranate"],
+]
+
+
+func _fridge(pos: Vector3, rot: float, label: String, rows: Array) -> void:
+	# Glass-door commercial fridge.
+	var f := _frame(pos, rot)
 	var steel := Tex.mat("steel")
 	var w := 0.92
 	var d := 0.72
@@ -359,7 +400,7 @@ func _fridge(pos: Vector3) -> void:
 	_box(f, steel, Vector3(0, 0.08, 0), Vector3(w, 0.16, d))
 	_box(f, Tex.mat("fridge_inside"), Vector3(0, h / 2, -d / 2 + 0.02), Vector3(w - 0.08, h - 0.32, 0.03))
 	var sign := Label3D.new()
-	sign.text = "FRESH"
+	sign.text = label
 	sign.font = UI.title_font()
 	sign.font_size = 64
 	sign.pixel_size = 0.0018
@@ -367,12 +408,6 @@ func _fridge(pos: Vector3) -> void:
 	sign.outline_size = 0
 	sign.position = Vector3(0, h - 0.08, d / 2 + 0.002)
 	f.add_child(sign)
-	var rows := [
-		["chicken", "beef", "ground_beef", "bacon", "sausage"],
-		["ham", "pepperoni", "salmon", "white_fish", "shrimp"],
-		["egg", "butter", "cheese", "mozzarella", "parmesan", "tofu"],
-		["milk", "cream", "yogurt", "ice_cream", "broth", "coconut_milk"],
-	]
 	var inner := w - 0.1
 	for r in rows.size():
 		var y := 0.2 + r * 0.42
@@ -410,13 +445,7 @@ func _pantry(pos: Vector3) -> void:
 	for sx in [-1, 1]:
 		_box(f, wood, Vector3(sx * (w / 2 - 0.015), 1.0, 0), Vector3(0.03, 2.0, d))
 	_box(f, Tex.mat("oak_light"), Vector3(0, 1.0, -d / 2 + 0.008), Vector3(w - 0.06, 2.0, 0.016))
-	var rows := [
-		["flour", "sugar", "rice", "oats", "breadcrumbs"],
-		["pasta", "noodles", "bread", "bun", "tortilla"],
-		["nori", "chickpeas", "beans", "chocolate", "marshmallow"],
-		["oil", "soy_sauce", "ketchup", "mustard", "maple_syrup"],
-		["honey", "peanut_butter", "jam"],
-	]
+	var rows := PANTRY_ROWS
 	var inner := w - 0.06
 	for r in rows.size():
 		var y := 0.12 + r * 0.38
@@ -430,24 +459,20 @@ func _pantry(pos: Vector3) -> void:
 
 
 func _produce_stand(pos: Vector3) -> void:
-	# Three stepped tiers of wooden crates against the front wall, facing -z.
+	# Four stepped tiers of wooden crates against the front wall, facing -z.
 	var f := _frame(pos, 180.0)
 	var wood := Tex.mat("crate")
 	var dark := Tex.mat("walnut")
-	var rows := [
-		["tomato", "onion", "garlic", "potato", "carrot", "ginger", "pumpkin", "corn", "zucchini", "eggplant"],
-		["lettuce", "cabbage", "spinach", "broccoli", "cucumber", "bell_pepper", "chili", "mushroom", "scallion", "basil"],
-		["apple", "orange", "lemon", "lime", "banana", "strawberry", "blueberry", "pineapple", "mango", "avocado"],
-	]
-	var cw := 0.32
-	var width := cw * 10
-	for t in 3:
-		var z := 0.62 - t * 0.2
-		var y := 0.5 + t * 0.26
+	var rows := PRODUCE_ROWS
+	var width := 3.2
+	for t in rows.size():
+		var z := 0.66 - t * 0.17
+		var y := 0.46 + t * 0.24
+		var cw := width / (rows[t] as Array).size()
 		# tier frame
-		_box(f, dark, Vector3(0, y - 0.03, z), Vector3(width + 0.06, 0.04, 0.32))
+		_box(f, dark, Vector3(0, y - 0.03, z), Vector3(width + 0.06, 0.04, 0.2))
 		for sx in [-1, 1]:
-			_box(f, dark, Vector3(sx * (width / 2 + 0.02), y / 2, z), Vector3(0.04, y, 0.3))
+			_box(f, dark, Vector3(sx * (width / 2 + 0.02), y / 2, z), Vector3(0.04, y, 0.18))
 		var ids: Array = rows[t]
 		for i in ids.size():
 			var x := -width / 2 + cw * (i + 0.5)
@@ -456,12 +481,12 @@ func _produce_stand(pos: Vector3) -> void:
 			crate.position = Vector3(x, y, z)
 			crate.rotation_degrees.x = 12.0
 			# crate: base + slatted sides
-			_box(crate, wood, Vector3(0, 0.005, 0), Vector3(cw - 0.02, 0.01, 0.28))
+			_box(crate, wood, Vector3(0, 0.005, 0), Vector3(cw - 0.012, 0.01, 0.17))
 			for side in [-1, 1]:
 				for s in 2:
-					_box(crate, wood, Vector3(side * (cw / 2 - 0.016), 0.02 + s * 0.04, 0), Vector3(0.012, 0.03, 0.28))
-					_box(crate, wood, Vector3(0, 0.02 + s * 0.04, side * 0.134), Vector3(cw - 0.02, 0.03, 0.012))
-			_source(crate, ids[i], Vector3(0, 0.01, 0), Vector3(cw - 0.06, 0.2, 0.24))
+					_box(crate, wood, Vector3(side * (cw / 2 - 0.01), 0.02 + s * 0.04, 0), Vector3(0.008, 0.03, 0.17))
+					_box(crate, wood, Vector3(0, 0.02 + s * 0.04, side * 0.082), Vector3(cw - 0.012, 0.03, 0.008))
+			_source(crate, ids[i], Vector3(0, 0.01, 0), Vector3(cw - 0.03, 0.2, 0.15))
 	_box(f, dark, Vector3(0, 0.25, 0.75), Vector3(width + 0.06, 0.5, 0.06))
 	_collider(f, Vector3(0, 0.22, 0.45), Vector3(width, 0.45, 0.6))
 	var sign := Label3D.new()
@@ -471,9 +496,39 @@ func _produce_stand(pos: Vector3) -> void:
 	sign.pixel_size = 0.0022
 	sign.modulate = Color(0.95, 0.9, 0.78)
 	sign.outline_size = 0
-	sign.position = Vector3(0, 1.45, 0.02)
+	sign.position = Vector3(0, 1.66, 0.02)
 	f.add_child(sign)
-	_box(f, Tex.mat("walnut"), Vector3(0, 1.45, 0.005), Vector3(1.6, 0.22, 0.02))
+	_box(f, Tex.mat("walnut"), Vector3(0, 1.66, 0.005), Vector3(1.6, 0.22, 0.02))
+
+
+## Tall open shelving on the front wall: tins, spices, oils, sauces and sweets.
+func _dry_goods(pos: Vector3) -> void:
+	var f := _frame(pos, 180.0)
+	var wood := Tex.mat("oak")
+	var w := 2.8
+	var d := 0.4
+	for sx in [-1, 1]:
+		_box(f, wood, Vector3(sx * (w / 2 - 0.015), 1.05, 0), Vector3(0.03, 2.1, d))
+	_box(f, Tex.mat("oak_light"), Vector3(0, 1.05, -d / 2 + 0.008), Vector3(w - 0.06, 2.1, 0.016))
+	var inner := w - 0.06
+	for r in DRY_ROWS.size():
+		var y := 0.12 + r * 0.33
+		_box(f, wood, Vector3(0, y - 0.015, 0), Vector3(inner, 0.03, d - 0.01))
+		var ids: Array = DRY_ROWS[r]
+		var sw := inner / ids.size()
+		for i in ids.size():
+			_source(f, ids[i], Vector3(-inner / 2 + sw * (i + 0.5), y, 0.02), Vector3(sw - 0.01, 0.27, 0.3))
+	_box(f, wood, Vector3(0, 2.1, 0), Vector3(w, 0.03, d))
+	var sign := Label3D.new()
+	sign.text = "DRY GOODS  ·  SAUCES  ·  SWEETS"
+	sign.font = UI.title_font()
+	sign.font_size = 64
+	sign.pixel_size = 0.0018
+	sign.modulate = Color(0.95, 0.9, 0.78)
+	sign.outline_size = 0
+	sign.position = Vector3(0, 2.25, 0.0)
+	f.add_child(sign)
+	_collider(f, Vector3(0, 1.05, -0.1), Vector3(w, 2.1, 0.2))
 
 
 func _island(pos: Vector3) -> void:
