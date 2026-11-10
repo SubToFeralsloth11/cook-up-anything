@@ -195,6 +195,18 @@ func _runtime() -> void:
 	for id in DB.ING:
 		if not DB.flag(id, "i"):
 			check(ids.has(id), "ingredient %s has a place in the kitchen" % id)
+	# every recipe's Teach me lesson only sends you to real shelves and stations
+	var g: Guide = main.guide
+	for k in DB.recipe_count():
+		g.teach(k)
+		var bad := ""
+		for s in g.steps:
+			if s["do"] == "note" or (s["do"] == "grab" and not ids.has(s["id"])):
+				bad = s["text"]
+			if s.has("kind") and main._station(s["kind"]) == null:
+				bad = "no station " + s["kind"]
+		check(bad == "" and g.steps.size() >= 2, "teach %s: %s" % [DB.display_name(k), bad])
+	g.stop()
 	var sink: Station = main._station("sink")
 	pl.target = {"kind": "station", "node": sink}
 	pl.interact()

@@ -11,6 +11,7 @@ var sfx: Sfx
 var ui: UI
 var player: Player
 var kitchen: Kitchen
+var guide: Guide
 var items: Node3D
 var clock: Node3D
 var menu_cam := Camera3D.new()
@@ -50,6 +51,9 @@ func _ready() -> void:
 	ui = UI.new()
 	ui.game = self
 	add_child(ui)
+	guide = Guide.new()
+	guide.game = self
+	add_child(guide)
 	_load()
 	_apply_quality()
 	show_menu()
@@ -60,7 +64,8 @@ func _inputs() -> void:
 		"move_forward": [KEY_W, KEY_UP], "move_back": [KEY_S, KEY_DOWN],
 		"move_left": [KEY_A, KEY_LEFT], "move_right": [KEY_D, KEY_RIGHT],
 		"interact": [KEY_E], "use": [KEY_F], "throw": [KEY_Q], "book": [KEY_TAB],
-		"pause": [KEY_ESCAPE, KEY_P], "sprint": [KEY_SHIFT],
+		"pause": [KEY_ESCAPE, KEY_P], "sprint": [KEY_SHIFT], "pantry": [KEY_I],
+		"guide_next": [KEY_N], "guide_back": [KEY_B], "guide_stop": [KEY_X],
 	}
 	for a in keys:
 		if not InputMap.has_action(a):
@@ -126,6 +131,7 @@ func start(m: String) -> void:
 
 func _clear_world() -> void:
 	player.drop_held()
+	guide.stop()
 	for c in items.get_children():
 		c.queue_free()
 	for st in kitchen.stations:
@@ -195,8 +201,36 @@ func _unhandled_input(e: InputEvent) -> void:
 			ui.close_modal()
 		elif ui.modal == "":
 			ui.open_book()
+	elif e.is_action_pressed("pantry"):
+		if ui.modal == "pantry":
+			ui.close_modal()
+		elif ui.modal == "":
+			ui.open_pantry()
+	elif ui.modal == "" and guide.active() and e.is_action_pressed("guide_next"):
+		guide.skip(1)
+	elif ui.modal == "" and guide.active() and e.is_action_pressed("guide_back"):
+		guide.skip(-1)
+	elif ui.modal == "" and guide.active() and e.is_action_pressed("guide_stop"):
+		guide.stop()
+		toast("Lesson stopped")
 	elif e is InputEventMouseButton and e.pressed and ui.modal == "" and Input.mouse_mode != Input.MOUSE_MODE_CAPTURED:
 		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+
+
+## Start (or continue) playing with arrows guiding you through recipe k.
+func teach(k: int) -> void:
+	ui.close_modal()
+	if mode != "sandbox" and mode != "orders":
+		start("sandbox")
+	guide.teach(k)
+
+
+## Point arrows at where an ingredient is kept.
+func show_where(id: String) -> void:
+	ui.close_modal()
+	if mode != "sandbox" and mode != "orders":
+		start("sandbox")
+	guide.show_where(id)
 
 
 # ================================================================ loop
@@ -338,6 +372,7 @@ func serve(b: RigidBody3D) -> void:
 	tw.parallel().tween_property(b, "scale", Vector3.ONE * 0.2, 0.6)
 	tw.tween_callback(b.queue_free)
 	_save()
+	guide.on_served()
 
 
 func _station(kind: String) -> Station:
