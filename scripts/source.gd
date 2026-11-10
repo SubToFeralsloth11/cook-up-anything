@@ -35,19 +35,21 @@ func _ready() -> void:
 		(mi as GeometryInstance3D).cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	tag = Label3D.new()
 	tag.text = DB.ING[id][0]
+	tag.font = UI.body_font()
 	tag.font_size = 32
-	tag.pixel_size = 0.0011
+	# shrink long names so neighbouring tags never overlap (~0.42 em per glyph)
+	var text_w := tag.text.length() * 32 * 0.42
+	tag.pixel_size = minf(0.0011, slot.x * 0.9 / maxf(text_w, 1.0))
 	tag.outline_size = 0
 	tag.modulate = Color(0.12, 0.1, 0.08)
 	tag.position = Vector3(0, 0.012, slot.z / 2 + 0.006)
 	tag.visibility_range_end = 3.2
-	tag.font = UI.body_font()
 	add_child(tag)
 	var card := MeshInstance3D.new()
 	card.mesh = Models.mesh("box")
 	card.material_override = Tex.mat("paper")
 	card.position = tag.position + Vector3(0, 0, -0.003)
-	card.scale = Vector3(minf(slot.x * 0.95, 0.03 + tag.text.length() * 0.0105), 0.022, 0.002)
+	card.scale = Vector3(minf(slot.x * 0.95, 0.02 + text_w * tag.pixel_size), 0.022, 0.002)
 	add_child(card)
 
 

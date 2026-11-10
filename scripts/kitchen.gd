@@ -31,7 +31,6 @@ func build() -> void:
 	_room()
 	# ---- back wall (z = -D), facing +z
 	var back := _frame(Vector3(0, 0, -D + 0.32), 0.0)
-	_cabinets(back, -2.5, 0.9, "marble")
 	_cabinets(back, 1.025, 4.35, "marble")
 	_station("sink", Vector3(-1.6, TOP, -D + 0.32), 0.0)
 	_station("board", Vector3(-0.75, TOP, -D + 0.38), 0.0)
@@ -41,12 +40,11 @@ func build() -> void:
 	_station("toaster", Vector3(2.35, TOP, -D + 0.36), 0.0)
 	_station("trash", Vector3(3.68, 0, -D + 0.35), 0.0)
 	_upper_cabinets(_frame(Vector3(1.1, 0, -D), 0.0), 4.2)
-	_backsplash(Vector3(0.1, 0, -D), 6.2, 0.0)
-	_spice_shelf(Vector3(2.55, 1.15, -D + 0.1))
-	_fridge(Vector3(-4.48, 0, -D + 0.4), 0.0, "FRESH", FRESH_ROWS)
-	_fridge(Vector3(-W + 0.4, 0, 3.15), 90.0, "DAIRY", DAIRY_ROWS)
-	_pantry(Vector3(-3.45, 0, -D + 0.22))
-	_dry_goods(Vector3(3.35, 0, D - 0.22))
+	_backsplash(Vector3(0.575, 0, -D), 5.25, 0.0)
+	_spice_shelf(Vector3(2.55, 1.24, -D + 0.1))
+	_chalkboard(Vector3(4.1, 1.6, -D + 0.02), 0.0)
+	# back-left corner: one wide, walk-up pantry instead of a cramped fridge + cupboard
+	_pantry(Vector3(-3.53, 0, -D + 0.22), 2.8)
 	# ---- left wall (x = -W), facing +x; local +x runs towards -z
 	var left_x := -W + 0.32
 	_cabinets(_frame(Vector3(left_x, 0, -2.275), 90.0), 0.0, 1.25, "marble")
@@ -56,9 +54,11 @@ func build() -> void:
 	_hood(Vector3(-W + 0.28, 1.95, -1.2))
 	_cabinets(_frame(Vector3(left_x, 0, 0.0), 90.0), 0.0, 1.5, "marble")
 	_station("fryer", Vector3(left_x + 0.02, TOP, 0.25), 90.0)
-	_cabinets(_frame(Vector3(left_x, 0, 1.675), 90.0), 0.0, 1.85, "marble")
-	_backsplash(Vector3(-W, 0, -0.15), 5.5, 90.0)
-	_utensils(Vector3(left_x - 0.1, TOP, 1.1))
+	_backsplash(Vector3(-W, 0, -1.075), 3.65, 90.0)
+	_utensils(Vector3(left_x - 0.1, TOP, -0.45))
+	# left wall, front half: two wide open-front chillers
+	_fridge(Vector3(-W + 0.4, 0, 1.7), 90.0, "MEAT & FISH", FRESH_ROWS, 1.6)
+	_fridge(Vector3(-W + 0.4, 0, 3.25), 90.0, "DAIRY", DAIRY_ROWS, 1.3)
 	# ---- right wall (x = W), facing -x; local +x runs towards +z
 	var right_x := W - 0.32
 	_cabinets(_frame(Vector3(right_x, 0, -0.75), -90.0), 0.0, 4.1, "marble")
@@ -71,8 +71,9 @@ func build() -> void:
 	# ---- island
 	_island(Vector3(0, 0, 0.35))
 	_station("grill", Vector3(-0.92, TOP, -0.02), 0.0)
-	# ---- produce stand on the front wall
-	_produce_stand(Vector3(0, 0, D))
+	# ---- front wall: produce stand and dry goods, side by side with a gap
+	_produce_stand(Vector3(-0.55, 0, D), 4.2)
+	_dry_goods(Vector3(3.2, 0, D - 0.22), 3.0)
 	_decor()
 	_lights()
 	Batch.merge(root)
@@ -219,7 +220,6 @@ func _room() -> void:
 		_box(door, skirt, Vector3(sx, 1.03, 0.02), Vector3(0.06, 2.12, 0.05))
 	Models.solid(door, "sphere", Tex.mat("brass"), Vector3(0.36, 1.0, 0.08), Vector3.ONE * 0.06)
 	_clock(Vector3(0, 2.25, D - 0.02))
-	_chalkboard(Vector3(W - 0.02, 1.55, 3.1))
 
 
 func _wall(pos: Vector3, size: Vector3, mat: Material) -> void:
@@ -387,11 +387,10 @@ const PRODUCE_ROWS := [
 ]
 
 
-func _fridge(pos: Vector3, rot: float, label: String, rows: Array) -> void:
-	# Glass-door commercial fridge.
+func _fridge(pos: Vector3, rot: float, label: String, rows: Array, w: float) -> void:
+	# Open-front display chiller: nothing between you and the shelves.
 	var f := _frame(pos, rot)
 	var steel := Tex.mat("steel")
-	var w := 0.92
 	var d := 0.72
 	var h := 2.05
 	_box(f, steel, Vector3(-w / 2 + 0.02, h / 2, 0), Vector3(0.04, h, d))
@@ -417,17 +416,8 @@ func _fridge(pos: Vector3, rot: float, label: String, rows: Array) -> void:
 		var sw := inner / ids.size()
 		for i in ids.size():
 			_source(f, ids[i], Vector3(-inner / 2 + sw * (i + 0.5), y, 0.02), Vector3(sw - 0.01, 0.34, 0.4))
-	# glass doors (visual only, you reach through)
-	for sx in [-1, 1]:
-		var door := MeshInstance3D.new()
-		door.mesh = Models.mesh("box")
-		door.material_override = Tex.mat("glass_fridge")
-		door.position = Vector3(sx * w / 4, h / 2, d / 2 + 0.01)
-		door.scale = Vector3(w / 2 - 0.02, h - 0.34, 0.01)
-		door.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-		door.set_meta("nobatch", true)
-		f.add_child(door)
-		_box(f, steel, Vector3(sx * 0.03, h / 2 + 0.1, d / 2 + 0.05), Vector3(0.02, 0.5, 0.02))
+	# chilled air curtain strip along the top (visual cue it's cold, keeps the front open)
+	_box(f, Models.glow_mat(Color(0.75, 0.9, 1.0), 1.5), Vector3(0, h - 0.165, d / 2 - 0.04), Vector3(inner, 0.01, 0.03))
 	var cold := OmniLight3D.new()
 	cold.position = Vector3(0, h / 2, 0.1)
 	cold.light_color = Color(0.85, 0.93, 1.0)
@@ -437,10 +427,9 @@ func _fridge(pos: Vector3, rot: float, label: String, rows: Array) -> void:
 	_collider(f, Vector3(0, h / 2, -0.1), Vector3(w, h, d - 0.25))
 
 
-func _pantry(pos: Vector3) -> void:
+func _pantry(pos: Vector3, w: float) -> void:
 	var f := _frame(pos, 0.0)
 	var wood := Tex.mat("oak")
-	var w := 1.0
 	var d := 0.42
 	for sx in [-1, 1]:
 		_box(f, wood, Vector3(sx * (w / 2 - 0.015), 1.0, 0), Vector3(0.03, 2.0, d))
@@ -455,18 +444,33 @@ func _pantry(pos: Vector3) -> void:
 		for i in ids.size():
 			_source(f, ids[i], Vector3(-inner / 2 + sw * (i + 0.5), y, 0.02), Vector3(sw - 0.01, 0.3, 0.32))
 	_box(f, wood, Vector3(0, 2.0, 0), Vector3(w, 0.03, d))
+	_sign(f, "BAKERY  ·  PASTA  ·  GRAINS", Vector3(0, 2.14, 0.0), 64, 0.0018)
 	_collider(f, Vector3(0, 1.0, -0.12), Vector3(w, 2.0, 0.18))
 
 
-func _produce_stand(pos: Vector3) -> void:
+## Shop-style label text, e.g. above a shelf unit.
+func _sign(parent: Node3D, text: String, pos: Vector3, size: int, px: float) -> Label3D:
+	var sign := Label3D.new()
+	sign.text = text
+	sign.font = UI.title_font()
+	sign.font_size = size
+	sign.pixel_size = px
+	sign.modulate = Color(0.95, 0.9, 0.78)
+	sign.outline_size = 0
+	sign.position = pos
+	parent.add_child(sign)
+	return sign
+
+
+func _produce_stand(pos: Vector3, width: float) -> void:
 	# Four stepped tiers of wooden crates against the front wall, facing -z.
+	# Tiers step back 0.2 m so tilted crates never poke into the row behind.
 	var f := _frame(pos, 180.0)
 	var wood := Tex.mat("crate")
 	var dark := Tex.mat("walnut")
 	var rows := PRODUCE_ROWS
-	var width := 3.2
 	for t in rows.size():
-		var z := 0.66 - t * 0.17
+		var z := 0.72 - t * 0.2
 		var y := 0.46 + t * 0.24
 		var cw := width / (rows[t] as Array).size()
 		# tier frame
@@ -487,25 +491,16 @@ func _produce_stand(pos: Vector3) -> void:
 					_box(crate, wood, Vector3(side * (cw / 2 - 0.01), 0.02 + s * 0.04, 0), Vector3(0.008, 0.03, 0.17))
 					_box(crate, wood, Vector3(0, 0.02 + s * 0.04, side * 0.082), Vector3(cw - 0.012, 0.03, 0.008))
 			_source(crate, ids[i], Vector3(0, 0.01, 0), Vector3(cw - 0.03, 0.2, 0.15))
-	_box(f, dark, Vector3(0, 0.25, 0.75), Vector3(width + 0.06, 0.5, 0.06))
-	_collider(f, Vector3(0, 0.22, 0.45), Vector3(width, 0.45, 0.6))
-	var sign := Label3D.new()
-	sign.text = "FARMERS MARKET"
-	sign.font = UI.title_font()
-	sign.font_size = 96
-	sign.pixel_size = 0.0022
-	sign.modulate = Color(0.95, 0.9, 0.78)
-	sign.outline_size = 0
-	sign.position = Vector3(0, 1.66, 0.02)
-	f.add_child(sign)
-	_box(f, Tex.mat("walnut"), Vector3(0, 1.66, 0.005), Vector3(1.6, 0.22, 0.02))
+	_box(f, dark, Vector3(0, 0.25, 0.81), Vector3(width + 0.06, 0.5, 0.06))
+	_collider(f, Vector3(0, 0.22, 0.48), Vector3(width, 0.45, 0.66))
+	_box(f, Tex.mat("walnut"), Vector3(0, 1.72, 0.005), Vector3(2.4, 0.24, 0.02))
+	_sign(f, "FARMERS MARKET", Vector3(0, 1.72, 0.022), 96, 0.0022)
 
 
 ## Tall open shelving on the front wall: tins, spices, oils, sauces and sweets.
-func _dry_goods(pos: Vector3) -> void:
+func _dry_goods(pos: Vector3, w: float) -> void:
 	var f := _frame(pos, 180.0)
 	var wood := Tex.mat("oak")
-	var w := 2.8
 	var d := 0.4
 	for sx in [-1, 1]:
 		_box(f, wood, Vector3(sx * (w / 2 - 0.015), 1.05, 0), Vector3(0.03, 2.1, d))
@@ -519,15 +514,7 @@ func _dry_goods(pos: Vector3) -> void:
 		for i in ids.size():
 			_source(f, ids[i], Vector3(-inner / 2 + sw * (i + 0.5), y, 0.02), Vector3(sw - 0.01, 0.27, 0.3))
 	_box(f, wood, Vector3(0, 2.1, 0), Vector3(w, 0.03, d))
-	var sign := Label3D.new()
-	sign.text = "DRY GOODS  ·  SAUCES  ·  SWEETS"
-	sign.font = UI.title_font()
-	sign.font_size = 64
-	sign.pixel_size = 0.0018
-	sign.modulate = Color(0.95, 0.9, 0.78)
-	sign.outline_size = 0
-	sign.position = Vector3(0, 2.25, 0.0)
-	f.add_child(sign)
+	_sign(f, "TINS · SPICES · SAUCES · SWEETS", Vector3(0, 2.25, 0.0), 64, 0.0018)
 	_collider(f, Vector3(0, 1.05, -0.1), Vector3(w, 2.1, 0.2))
 
 
@@ -585,7 +572,7 @@ func _utensils(pos: Vector3) -> void:
 		Models.solid(f, "cyl", cols[i], Vector3(cos(a) * 0.025, 0.24, sin(a) * 0.025), Vector3(0.014, 0.32, 0.014), Vector3(cos(a) * 10, 0, sin(a) * 10))
 		Models.solid(f, "sphere", cols[i], Vector3(cos(a) * 0.04, 0.4, sin(a) * 0.04), Vector3(0.05, 0.015, 0.035), Vector3(cos(a) * 10, rad_to_deg(a), sin(a) * 10))
 	# magnetic knife strip on the wall
-	var k := _frame(Vector3(-W + 0.01, 1.32, 1.6), 90.0)
+	var k := _frame(Vector3(-W + 0.01, 1.36, pos.z + 0.25), 90.0)
 	_box(k, Tex.mat("black"), Vector3(0, 0, 0.01), Vector3(0.5, 0.04, 0.02))
 	for i in 4:
 		_box(k, Tex.mat("steel"), Vector3(-0.18 + i * 0.12, -0.08, 0.025), Vector3(0.025, 0.16 - i * 0.02, 0.003))
@@ -615,15 +602,15 @@ func _clock(pos: Vector3) -> void:
 	game.clock = hands
 
 
-func _chalkboard(pos: Vector3) -> void:
-	var b := _frame(pos, 180.0)
-	_box(b, Tex.mat("oak"), Vector3(0, 0, 0.0), Vector3(1.2, 0.85, 0.03))
-	_box(b, Tex.mat("chalk"), Vector3(0, 0, 0.012), Vector3(1.1, 0.75, 0.012))
+func _chalkboard(pos: Vector3, rot_y: float) -> void:
+	var b := _frame(pos, rot_y)
+	_box(b, Tex.mat("oak"), Vector3(0, 0, 0.0), Vector3(1.5, 0.85, 0.03))
+	_box(b, Tex.mat("chalk"), Vector3(0, 0, 0.012), Vector3(1.4, 0.75, 0.012))
 	var l := Label3D.new()
 	l.text = "TODAY'S SPECIAL\n\nAnything you can dream up.\nWash it. Chop it. Cook it.\nPlate it. Serve it."
 	l.font = UI.hand_font()
 	l.font_size = 56
-	l.pixel_size = 0.0021
+	l.pixel_size = 0.0018
 	l.modulate = Color(0.95, 0.95, 0.9, 0.92)
 	l.outline_size = 0
 	l.position.z = 0.02
