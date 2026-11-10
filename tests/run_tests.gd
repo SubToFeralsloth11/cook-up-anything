@@ -40,7 +40,13 @@ func satisfy(sp: Dictionary) -> Dictionary:
 		cook = sp["m"][0]
 	elif sp["any_cook"]:
 		cook = "fry"
-	return leaf(id, mini(cut, 3), cook)
+	var l := leaf(id, mini(cut, 3), "" if cook in DB.COLD else cook)
+	if cook in DB.COLD:
+		l["cold"] = cook
+	l["style"] = alt["style"]
+	if alt["coat"]:
+		l["coat"] = "crumb"
+	return l
 
 
 func _init() -> void:
@@ -56,7 +62,11 @@ func _init() -> void:
 			if used.has(l["id"]) and not (sp["alts"][0]["cats"] as Array).is_empty():
 				for kid in DB.ING:
 					if DB.ING[kid][1] == sp["alts"][0]["cats"][0] and not used.has(kid) and not DB.flag(kid, "i"):
-						l = leaf(kid, l["cut"], l["cook"])
+						var nl := leaf(kid, l["cut"], l["cook"])
+						nl["coat"] = l["coat"]
+						nl["style"] = l["style"]
+						nl["cold"] = l["cold"]
+						l = nl
 						break
 			used[l["id"]] = true
 			ls.append(l)
@@ -93,6 +103,23 @@ func _init() -> void:
 	var cooked := DB.judge([leaf("chicken", 0, "bake")])
 	check(cooked["stars"] > raw["stars"], "cooked chicken should beat raw chicken")
 	check(cooked["name"] == "Roast Chicken", "baked chicken is Roast Chicken, got " + cooked["name"])
+	# breading: diced chicken + breadcrumbs (+ egg wash) -> coated pieces -> nuggets when fried
+	var dc := leaf("chicken_breast", 1)
+	dc["style"] = "dice"
+	var co := DB.coat([dc, leaf("breadcrumbs"), leaf("beaten_egg")])
+	check(co["coated"].size() == 1 and co["rest"].is_empty(), "breadcrumbs + egg wash coat the chicken and are used up")
+	var nug: Dictionary = co["coated"][0]
+	nug["cook"] = "deepfry"
+	nug["cooked"] = true
+	check(DB.identify([nug])["name"] == "Chicken Nuggets", "breaded diced chicken deep-fried = nuggets, got " + DB.identify([nug])["name"])
+	# hot dogs need a hot dog bun; a burger bun with a sausage is not a hot dog
+	check(DB.identify([leaf("hot_dog_bun"), leaf("frankfurter", 0, "grill")])["name"] == "Hot Dog", "hot dog bun + cooked frank = Hot Dog")
+	check(DB.identify([leaf("bun"), leaf("sausage", 0, "fry")])["name"] != "Hot Dog", "burger bun + sausage is not a hot dog")
+	# fridge: cream + sugar freezes into ice cream
+	var fr := DB.apply_rules("freeze", [leaf("cream"), leaf("sugar"), leaf("strawberry")])
+	check(not fr["made"].is_empty() and fr["made"][0]["id"] == "ice_cream", "cream + sugar + fruit freezes into ice cream")
+	# sweet + savoury nonsense is marked down vs a sensible off-menu dish
+	check(DB.judge([leaf("sprinkles"), leaf("salmon", 0, "fry"), leaf("ketchup")])["stars"] < DB.judge([leaf("salmon", 0, "fry"), leaf("lemon"), leaf("spinach", 0, "fry")])["stars"], "nonsense combos score below sensible ones")
 	_runtime.call_deferred()
 
 
@@ -133,9 +160,10 @@ func _runtime() -> void:
 	main.items.add_child(tomato)
 	check(board.accepts(tomato) == "", "board takes tomato")
 	board.add_food(tomato)
-	for i in Station.CHOPS:
+	board.choose_style("slice")
+	for i in Station.CHOPS - 1:
 		board.use()
-	check(int(tomato.data["cut"]) == 1, "4 chops should chop the tomato")
+	check(int(tomato.data["cut"]) == 1 and tomato.data["style"] == "slice", "4 slice chops should slice the tomato")
 	var plate := Plate.new()
 	main.items.add_child(plate)
 	plate.add_data(DB.new_leaf("bun"))
@@ -177,7 +205,8 @@ func _runtime() -> void:
 			board2 = s
 	pl.target = {"kind": "station", "node": board2}
 	pl.interact()
-	for i in Station.CHOPS:
+	board2.choose_style("dice")
+	for i in Station.CHOPS - 1:
 		pl.use()
 	pl.interact()
 	check(pl.held is Food and int((pl.held as Food).data["cut"]) == 1, "chopped potato in hand")
@@ -188,7 +217,7 @@ func _runtime() -> void:
 	while not fryer.done_once and n < 1000:
 		fryer._tick_cook(0.05)
 		n += 1
-	check((fryer.contents[0] as Food).data["id"] == "fries", "fryer turns chopped potato into fries")
+	check((fryer.contents[0] as Food).data["id"] == "fries", "fryer turns diced potato into fries")
 	pl.target = {"kind": "station", "node": main._station("plates")}
 	pl.interact()
 	check(pl.held is Plate, "plates station hands out a plate")
