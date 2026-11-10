@@ -71,6 +71,7 @@ func can_add() -> bool:
 
 
 func add_data(d: Dictionary) -> void:
+	DB.portion(d)
 	items.append(d)
 	rebuild()
 	if food_root:
@@ -96,17 +97,38 @@ func rebuild() -> void:
 	food_root = Node3D.new()
 	food_root.position.y = 0.018
 	add_child(food_root)
+	var all := leaves()
+	var tops := []
+	var body := []
+	var framed := Models.has_frame(all)
+	for l in all:
+		if all.size() > 1 and Models.is_top(l, framed):
+			tops.append(l)
+		else:
+			body.append(l)
+	if body.is_empty():
+		body = tops
+		tops = []
 	var b := Models.new(food_root)
-	if items.size() == 1:
-		b.build(items[0])
+	if body.size() == 1:
+		b.build(body[0])
 	else:
-		b.build({"id": "mix", "parts": leaves()})
+		b.build({"id": "mix", "parts": body})
 	tints = b.tints
 	# keep big piles within the plate
 	var aabb := b._bounds()
 	var w := maxf(aabb.size.x, aabb.size.z)
-	fit = minf(1.0, 0.32 / maxf(w, 0.001))
+	var side := 0.0
+	for l in tops:
+		if l.get("sstyle", "") == "side":
+			side = 0.11
+	fit = minf(1.0, (0.32 - side) / maxf(w, 0.001))
 	food_root.scale = Vector3.ONE * fit
+	food_root.position.x = -side * 0.5
+	if not tops.is_empty():
+		var tb := Models.new(food_root)
+		tb.top_coat(tops, 1.0 / fit)
+		tints.append_array(tb.tints)
 
 
 func display_name() -> String:

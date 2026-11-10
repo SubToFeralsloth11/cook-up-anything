@@ -239,7 +239,8 @@ static func apply_tint(t: Array) -> void:
 
 
 static func leaf_mesh(d: Dictionary, variant := "") -> ArrayMesh:
-	var key := "%s|%d|%s|%s" % [d["id"], int(d.get("cut", 0)), d.get("flavor", ""), variant]
+	var key := "%s|%d|%s|%s|%s|%s|%d|%s" % [d["id"], int(d.get("cut", 0)), d.get("flavor", ""), variant,
+		d.get("style", ""), d.get("coat", ""), int(d.get("pieces", 0)), "p" if d.get("portion", false) else ""]
 	if _food.has(key):
 		return _food[key]
 	var g := Models.new(null)
@@ -248,6 +249,28 @@ static func leaf_mesh(d: Dictionary, variant := "") -> ArrayMesh:
 	var m := g.finish()
 	_food[key] = m
 	return m
+
+
+## Exaggeration over real life so food reads well in first person.
+const K := 2.2
+static var _fix := {}
+
+
+## Scale that makes an ingredient's whole model match DB.REAL (cm) x K.
+static func size_fix(id: String) -> float:
+	if not DB.REAL.has(id):
+		return 1.0
+	if _fix.has(id):
+		return _fix[id]
+	_fix[id] = 1.0
+	var g := Models.new(null)
+	g.begin("fix|" + id)
+	g._gen(DB.new_leaf(id), "")
+	var bb := g.b.aabb().merge(g.gl.aabb()) if not g.gl.empty() else g.b.aabb()
+	var longest := maxf(bb.size.x, maxf(bb.size.y, bb.size.z))
+	var f := float(DB.REAL[id]) / 100.0 * K / maxf(longest, 0.001)
+	_fix[id] = f
+	return f
 
 
 func begin(key: String) -> void:
@@ -436,20 +459,26 @@ func _gen(d: Dictionary, variant: String) -> void:
 	var ing: Array = DB.ING[id]
 	var oc := Color(ing[3])
 	var ic := Color(ing[4])
-	var s: float = ing[5] * S
+	var s: float = ing[5] * S * size_fix(id)
 	var cut: int = int(d.get("cut", 0))
 	if d.has("flavor"):
 		var fc := Color(DB.ING[d["flavor"]][4])
-		if id in ["smoothie", "juice", "milkshake", "pie", "cake", "muffins", "donuts", "porridge", "yogurt", "ice_cream", "pancakes"]:
+		if id in ["smoothie", "juice", "milkshake", "pie", "cake", "muffins", "donuts", "porridge", "yogurt", "ice_cream",
+				"pancakes", "jelly", "ice_pop", "frozen_yogurt", "mug_cake", "cheesecake", "dal", "spring_rolls"]:
 			ic = fc
-			if id in ["smoothie", "juice", "milkshake"]:
+			if id in ["smoothie", "juice", "milkshake", "jelly", "ice_pop"]:
 				oc = fc
+		if id == "kebab":
+			oc = Color(DB.ING[d["flavor"]][7]) if DB.ING[d["flavor"]].size() > 7 else fc
 	match variant:
 		"layer":
 			_layer(id, cut, oc, ic)
 			return
 		"bun_bot", "bun_top":
 			_bun_half(s, oc, ic, variant == "bun_top", id)
+			return
+		"dog_open":
+			_hotdog_open(oc, ic)
 			return
 		"wrap", "taco":
 			_wrap_shell(oc, variant == "taco")
@@ -463,19 +492,97 @@ func _gen(d: Dictionary, variant: String) -> void:
 		base["cut"] = int(parts[2])
 		_sauce_on(ic, base)
 		return
+	if d.get("coat", "") != "":
+		_coated(d)
+		return
+	if d.get("portion", false):
+		_portion(id, oc, ic)
+		return
 	var shape: String = ing[2]
+	var look: String = DB.LOOK.get(id, id)
 	var liquid := DB.flag(id, "l")
 	if cut >= 3 or (liquid and not DB.flag(id, "i") and cut > 0):
-		_bowl_food(s * 0.9, ic, "liquid" if liquid else "puree", id)
+		_bowl_food(s * 0.9, ic, "liquid" if liquid else "puree", look)
 	elif cut > 0 and not shape in BOWLS:
-		_cut(id, shape, s, oc, ic, cut)
+		if cut == 1 and d.get("style", "") in ["dice", "free"]:
+			_styled_cut(d.get("style", ""), int(d.get("pieces", 0)), s, oc, ic, id)
+		else:
+			_cut(look, shape, s, oc, ic, cut)
 	else:
 		_whole(id, shape, s, oc, ic)
+
+
+## Diced cubes or the chunks a free-hand cut made.
+func _styled_cut(style: String, pieces: int, s: float, oc: Color, ic: Color, id: String) -> void:
+	var meat: bool = DB.ING[id][1] in ["meat", "fish"]
+	var skin := oc if not meat else ic.darkened(0.08)
+	if style == "dice":
+		_dice(18, 0.32 * s, 0.85 * s, ic, skin, 0.35)
+		return
+	var n := clampi(pieces, 2, 30)
+	var sz := 1.25 * s / pow(float(n), 0.42)
+	_dice(n, sz, sz * (0.6 + 0.35 * sqrt(float(n))), ic, skin, 0.55, 1.25)
+
+
+## Breaded / battered: the plain model inflated under a craggy crumb crust.
+func _coated(d: Dictionary) -> void:
+	var base := d.duplicate()
+	base["coat"] = ""
+	base.erase("portion")
+	var g := Models.new(null)
+	g.begin("coatbase")
+	g._gen(base, "")
+	var kind: String = d["coat"]
+	var cc := Color(DB.COAT_COLOR[kind])
+	var crumb: bool = kind in ["crumb", "panko"]
+	var bb := g.b.aabb()
+	var c := bb.get_center()
+	var th := minf(0.006, maxf(bb.size.y, 0.01) * 0.12)
+	for i in g.b.verts.size():
+		var p: Vector3 = g.b.verts[i]
+		var dir := p - c
+		dir.y *= 0.6
+		dir = dir.normalized() if dir.length() > 0.0001 else Vector3.UP
+		var bump := th * (0.6 + (0.9 * MeshGen.n3(p * 260.0) if crumb else 0.25 * MeshGen.n3(p * 70.0)))
+		g.b.verts[i] = p + dir * bump
+		g.b.cols[i] = _nz(cc, p, 0.28 if crumb else 0.1, 200.0 if crumb else 60.0)
+	b.append(g.b, Transform3D.IDENTITY)
+
+
+## A poured/scooped amount of a shop ingredient (no packet): puddle, heap, dollop or scoop.
+func _portion(id: String, oc: Color, ic: Color) -> void:
+	var shape: String = DB.ING[id][2]
+	var R := 0.055
+	if DB.flag(id, "l"):
+		b.mat(0.06, 0.05, 0.4)
+		b.dsolid(R, func(rn: float, _th: float) -> float: return 0.006 * (1.0 - pow(rn, 6.0)) + 0.001,
+			func(_rn: float, _th: float) -> float: return 0.0,
+			func(_f: int, _rn: float, _th: float, p: Vector3) -> Color: return _nz(ic, p, 0.04, 80.0), 28, 4,
+			func(th: float) -> float: return 1.0 + 0.16 * sin(th * 3.0 + 1.0) + 0.07 * sin(th * 7.0))
+		return
+	if DB.is_dust(id) or shape == "sack":
+		b.mat(0.9, 0.6)
+		b.dsolid(R * 0.8, func(rn: float, th: float) -> float: return 0.03 * pow(1.0 - rn, 1.4) + 0.002 * MeshGen.n3(Vector3(cos(th), 0, sin(th)) * rn * 9.0),
+			func(_rn: float, _th: float) -> float: return 0.0,
+			func(_f: int, _rn: float, _th: float, p: Vector3) -> Color: return _nz(ic, p, 0.22, 400.0), 24, 6)
+		return
+	if shape == "can" or id in ["peanuts", "almonds", "walnuts", "cashews", "raisins", "olives", "capers", "pickles"]:
+		b.mat(0.4, 0.3)
+		var r := 0.012 if id != "pickles" else 0.02
+		b.heap(16, R * 0.7, r * 0.6, r * 1.2, func(i: int) -> void:
+			b.blob(Vector3.ZERO, Vector3(r, r * 0.75, r * 0.85), oc.lerp(ic, MeshGen.h1(i) * 0.6), 8, 6), 7)
+		return
+	# spreads, tubs, pastes: a soft dollop/scoop
+	b.mat(0.3, 0.3)
+	b.blob(Vector3(0, 0.022, 0), Vector3(0.04, 0.024, 0.038), func(_u: float, _v: float, p: Vector3) -> Color: return _nz(ic, p, 0.06, 90.0), 16, 10,
+		func(th: float, v: float, _dd: Vector3) -> float: return 1.0 + 0.1 * sin(th * 5.0 + v * 4.0))
 
 
 # ================================================================ whole ingredients
 
 func _whole(id: String, shape: String, s: float, oc: Color, ic: Color) -> void:
+	var pid := id
+	id = DB.LOOK.get(id, id)
 	match id:
 		"tomato": _tomato(s, oc)
 		"onion": _onion(s, oc)
@@ -509,33 +616,38 @@ func _whole(id: String, shape: String, s: float, oc: Color, ic: Color) -> void:
 		"beef": _steak(s, oc, ic)
 		"ground_beef": _mince(s, oc, ic)
 		"bacon": _bacon(s, oc, ic)
-		"sausage": _sausage(s, oc)
+		"sausage": _sausage(s, oc, pid == "frankfurter")
 		"ham": _ham(s, oc, ic)
 		"pepperoni": _pepperoni(s, oc)
 		"salmon", "white_fish": _fillet(s, oc, ic, id == "salmon")
 		"shrimp": _shrimp(s, oc, ic)
 		"tofu": _tofu(s, oc)
 		"egg", "boiled_egg": _egg(s, oc)
-		"milk", "cream", "broth": _carton(s, id)
+		"milk", "cream", "broth": _carton(s, pid, oc)
 		"butter": _butter(s, oc)
 		"cheese", "parmesan": _wedge(s, oc, id == "parmesan")
 		"mozzarella": _mozzarella(s, oc)
 		"yogurt", "ice_cream": _tub(s, oc, ic, id == "ice_cream")
-		"flour", "sugar", "breadcrumbs", "rice": _bag(s, id, ic)
+		"flour", "sugar", "breadcrumbs", "rice": _bag(s, pid, ic)
 		"oats": _canister(s, ic)
 		"pasta": _spaghetti(s, oc)
 		"noodles": _noodle_brick(s, oc)
 		"bread", "bread_loaf": _loaf(s, oc, ic, id == "bread_loaf")
 		"bun": _bun(s, oc, ic)
+		"hot_dog_bun": _hotdog_bun(s, oc, ic)
+		"bagel": _bagel(s, oc, ic)
+		"croissant": _croissant(s, oc)
+		"kebab": _skewer(s, oc, ic)
+		"ice_pop": _icepop(s, oc)
 		"tortilla": _tortillas(s, oc)
 		"nori": _nori(s, oc)
-		"chickpeas", "beans", "coconut_milk": _can(s, id, ic)
+		"chickpeas", "beans", "coconut_milk": _can(s, pid, ic)
 		"salt": _salt(s)
 		"black_pepper": _mill(s)
-		"herbs", "curry_powder", "cinnamon": _spice_jar(s, id, ic)
+		"herbs", "curry_powder", "cinnamon": _spice_jar(s, pid, ic)
 		"vanilla", "oil", "soy_sauce", "maple_syrup": _bottle(s, id, oc)
 		"ketchup", "mustard": _squeeze(s, id, oc)
-		"honey", "jam", "peanut_butter", "sprinkles": _jar(s, id, oc)
+		"honey", "jam", "peanut_butter", "sprinkles": _jar(s, pid, oc)
 		"chocolate": _choc_bar(s, oc)
 		"marshmallow": _marshmallows(s, oc)
 		"fried_egg": _fried_egg(s)
@@ -1196,13 +1308,13 @@ func _bacon(s: float, oc: Color, ic: Color) -> void:
 				return c.lerp(fat, smoothstep(0.65, 0.85, x)), T / W)
 
 
-func _sausage(s: float, oc: Color) -> void:
+func _sausage(s: float, oc: Color, thin := false) -> void:
 	var L := 2.1 * s
-	var R := 0.34 * s
+	var R := (0.22 if thin else 0.34) * s
 	var keys := [Vector2(0, 0), Vector2(0.015, 0.3), Vector2(0.035, 0.42), Vector2(0.06, 0.75), Vector2(0.1, 0.94), Vector2(0.9, 0.94),
 		Vector2(0.94, 0.75), Vector2(0.965, 0.42), Vector2(0.985, 0.3), Vector2(1.0, 0)]
 	b.mat(0.3, 0.3)
-	b.tube(30, 16, func(t: float) -> Vector3: return Vector3(-L * 0.5 + L * t, R + 0.003, 0.3 * s * sin(t * PI)),
+	b.tube(30, 16, func(t: float) -> Vector3: return Vector3(-L * 0.5 + L * t, R + 0.003, (0.08 if thin else 0.3) * s * sin(t * PI)),
 		func(t: float, _th: float) -> float: return R * _keys(keys, t),
 		func(_u: float, _v: float, p: Vector3) -> Color:
 			return _nz(oc, p, 0.1, 8.0 / s).lerp(oc.darkened(0.2), clampf(MeshGen.n3(p * 22.0 / s), 0.0, 1.0) * 0.5))
@@ -1359,11 +1471,11 @@ func _egg(s: float, oc: Color) -> void:
 	b.xf = keep
 
 
-func _carton(s: float, id: String) -> void:
+func _carton(s: float, id: String, oc: Color) -> void:
 	var w := 1.1 * s
 	var h := 1.65 * s
 	var d := w
-	var lab: Color = {"milk": Color(0.2, 0.45, 0.85), "cream": Color(0.95, 0.72, 0.25), "broth": Color(0.85, 0.45, 0.15)}[id]
+	var lab: Color = {"milk": Color(0.2, 0.45, 0.85), "cream": Color(0.95, 0.72, 0.25), "broth": Color(0.85, 0.45, 0.15)}.get(id, oc.darkened(0.35))
 	var body := Color(0.97, 0.97, 0.95)
 	if id == "broth":
 		w = 1.0 * s
@@ -1536,8 +1648,8 @@ func _bag(s: float, id: String, ic: Color) -> void:
 	var w := 1.3 * s
 	var h := 1.9 * s
 	var d := 0.85 * s
-	var paper: Color = {"flour": Color(0.95, 0.93, 0.87), "sugar": Color(0.98, 0.98, 0.98), "breadcrumbs": Color(0.76, 0.6, 0.4), "rice": Color(0.97, 0.97, 0.95)}[id]
-	var lab: Color = {"flour": Color(0.22, 0.42, 0.78), "sugar": Color(0.85, 0.22, 0.32), "breadcrumbs": Color(0.95, 0.58, 0.12), "rice": Color(0.2, 0.55, 0.3)}[id]
+	var paper: Color = {"flour": Color(0.95, 0.93, 0.87), "sugar": Color(0.98, 0.98, 0.98), "breadcrumbs": Color(0.76, 0.6, 0.4), "rice": Color(0.97, 0.97, 0.95)}.get(id, ic.lerp(Color(0.97, 0.95, 0.9), 0.55))
+	var lab: Color = {"flour": Color(0.22, 0.42, 0.78), "sugar": Color(0.85, 0.22, 0.32), "breadcrumbs": Color(0.95, 0.58, 0.12), "rice": Color(0.2, 0.55, 0.3)}.get(id, Color.from_hsv(float(id.hash() % 360) / 360.0, 0.6, 0.75))
 	var f := func(p: Vector3) -> Vector3:
 		var y := p.y / h + 0.5
 		var q := p
@@ -1674,7 +1786,17 @@ func _bun(s: float, oc: Color, ic: Color) -> void:
 func _bun_half(_s: float, oc: Color, ic: Color, top: bool, id: String) -> void:
 	var R := STACK_R
 	var crumb := func(_f: int, _rn: float, _th: float, p: Vector3) -> Color: return _nz(ic, p, 0.08, 200.0)
-	if id != "bun":
+	if id == "bagel" or id == "croissant":
+		var keep := b.xf
+		var k := R / (0.98 * 0.1 * S)
+		b.at(Vector3.ZERO, Vector3.ZERO, Vector3(k, k * 0.5, k))
+		if id == "bagel":
+			_bagel(0.1 * S, oc if top else ic, ic)
+		else:
+			_croissant(0.1 * S, oc)
+		b.xf = keep
+		return
+	if not id in ["bun", "brioche_bun", "english_muffin", "crumpet", "bagel"]:
 		var rf := func(th: float) -> float:
 			var sq := 1.0 / pow(pow(absf(cos(th)), 5.0) + pow(absf(sin(th)), 5.0), 0.2)
 			return sq * (1.0 + 0.1 * pow(maxf(0.0, sin(th)), 3.0)) * 0.88
@@ -1740,7 +1862,7 @@ func _nori(s: float, oc: Color) -> void:
 func _can(s: float, id: String, ic: Color) -> void:
 	var R := 0.75 * s
 	var H := 1.45 * s
-	var lab: Color = {"beans": Color(0.85, 0.3, 0.15), "chickpeas": Color(0.92, 0.78, 0.3), "coconut_milk": Color(0.2, 0.55, 0.35)}[id]
+	var lab: Color = {"beans": Color(0.85, 0.3, 0.15), "chickpeas": Color(0.92, 0.78, 0.3), "coconut_milk": Color(0.2, 0.55, 0.35)}.get(id, Color.from_hsv(float(id.hash() % 360) / 360.0, 0.55, 0.8))
 	var pic := Color(0.45, 0.3, 0.2) if id == "coconut_milk" else ic
 	var pts := [Vector2(0, 0.02 * s), Vector2(0.9 * R, 0.0), Vector2(R, 0.04 * s), Vector2(R, 0.04 * s), Vector2(R, H - 0.04 * s),
 		Vector2(R, H - 0.04 * s), Vector2(0.96 * R, H), Vector2(0.9 * R, H - 0.02 * s), Vector2(0.9 * R, H - 0.02 * s), Vector2(0, H - 0.03 * s)]
@@ -1777,7 +1899,7 @@ func _mill(s: float) -> void:
 func _spice_jar(s: float, id: String, ic: Color) -> void:
 	var R := 0.5 * s
 	var H := 1.35 * s
-	var lid: Color = {"herbs": Color(0.2, 0.45, 0.2), "curry_powder": Color(0.75, 0.2, 0.15), "cinnamon": Color(0.15, 0.12, 0.1)}[id]
+	var lid: Color = {"herbs": Color(0.2, 0.45, 0.2), "curry_powder": Color(0.75, 0.2, 0.15), "cinnamon": Color(0.15, 0.12, 0.1)}.get(id, ic.darkened(0.45))
 	b.mat(0.1, 0.4, 0.0)
 	b.lathe(_sub([Vector2(0, 0), Vector2(R * 0.95, 0), Vector2(R, 0.05 * s), Vector2(R, H), Vector2(R, H), Vector2(0.8 * R, H)], 0.08 * s),
 		func(_u: float, _v: float, p: Vector3) -> Color:
@@ -1870,7 +1992,7 @@ func _squeeze(s: float, id: String, oc: Color) -> void:
 func _jar(s: float, id: String, oc: Color) -> void:
 	var R := (0.75 if id == "peanut_butter" else 0.62) * s
 	var H := (1.2 if id == "peanut_butter" else 1.25) * s
-	var lid: Color = {"honey": Color(0.85, 0.65, 0.2), "jam": Color(0.85, 0.15, 0.15), "peanut_butter": Color(0.8, 0.15, 0.12), "sprinkles": Color(0.97, 0.97, 0.97)}[id]
+	var lid: Color = {"honey": Color(0.85, 0.65, 0.2), "jam": Color(0.85, 0.15, 0.15), "peanut_butter": Color(0.8, 0.15, 0.12), "sprinkles": Color(0.97, 0.97, 0.97)}.get(id, Color.from_hsv(float(id.hash() % 360) / 360.0, 0.6, 0.7))
 	var hexy := id == "honey"
 	var rf := func(th: float, _t: float, _y: float) -> float: return (1.0 / cos(fposmod(th, PI / 3.0) - PI / 6.0)) * 0.93 if hexy else 1.0
 	var body := Color(0.97, 0.97, 0.98) if id == "sprinkles" else oc
@@ -2616,6 +2738,80 @@ func _bowl_food(s: float, fill: Color, style: String, id: String) -> void:
 				func(_f: int, _rn: float, _th: float, p: Vector3) -> Color: return _nz(fill, p, 0.02, 20.0 / s), 40, 12)
 
 
+# ---------------------------------------------------------------- new bakery / treats
+
+func _hotdog_bun(s: float, oc: Color, ic: Color) -> void:
+	b.mat(0.4, 0.35)
+	b.rbox(Vector3(0, 0.32 * s, 0), Vector3(2.4 * s, 0.64 * s, 0.75 * s), 0.5, func(_u: float, _v: float, p: Vector3) -> Color:
+		if p.y < 0.08 * s:
+			return _nz(ic, p, 0.06, 30.0 / s)
+		return _nz(oc.lerp(oc.darkened(0.15), smoothstep(0.2 * s, 0.6 * s, p.y)), p, 0.05, 12.0 / s), 24, 14)
+
+
+## Split hot dog bun lying open (two halves hinged along x), DOG_L long.
+func _hotdog_open(oc: Color, ic: Color) -> void:
+	var L := DOG_L
+	var H := 0.03
+	var W := 0.034
+	b.mat(0.4, 0.35)
+	for side in [-1.0, 1.0]:
+		var keep := b.xf
+		b.at(Vector3(0, H * 0.5, side * W * 0.62), Vector3(side * 28.0, 0, 0))
+		b.rbox(Vector3.ZERO, Vector3(L, H, W), 0.5, func(_u: float, _v: float, p: Vector3) -> Color:
+			var inner: bool = (p.z * side) < -W * 0.25
+			return _nz(ic, p, 0.07, 200.0) if inner else _nz(oc, p, 0.05, 60.0), 24, 12)
+		b.xf = keep
+
+
+func _bagel(s: float, oc: Color, ic: Color) -> void:
+	var R := 0.62 * s
+	var r := 0.36 * s
+	b.mat(0.35, 0.3)
+	b.tube(36, 14, func(t: float) -> Vector3: return Vector3(cos(t * TAU) * R, r * 0.8, sin(t * TAU) * R),
+		func(_t: float, _th: float) -> float: return r,
+		func(_u: float, v: float, p: Vector3) -> Color:
+			var top := clampf((p.y - r * 0.5) / r, 0.0, 1.0)
+			return _nz(ic.lerp(oc, 0.4 + 0.6 * top), p, 0.06, 20.0 / s), 0.8)
+
+
+func _croissant(s: float, oc: Color) -> void:
+	b.mat(0.45, 0.6)
+	b.tube(30, 14, func(t: float) -> Vector3:
+			var a := (t - 0.5) * PI * 0.95
+			return Vector3(sin(a) * 1.2 * s, 0.38 * s, -cos(a) * 0.75 * s + 0.4 * s),
+		func(t: float, _th: float) -> float: return 0.4 * s * pow(sin(PI * clampf(t, 0.0, 1.0)), 0.7) + 0.04 * s,
+		func(u: float, v: float, p: Vector3) -> Color:
+			var ridge := pow(absf(sin(v * PI * 7.0)), 6.0)
+			return _nz(oc.lerp(oc.lightened(0.35), ridge * 0.7), p, 0.06, 12.0 / s), 0.85)
+
+
+## Kebab: wooden skewer through alternating meat and veg chunks.
+func _skewer(s: float, oc: Color, ic: Color) -> void:
+	var L := 2.6 * s
+	b.mat(0.7, 0.2)
+	b.tube(6, 6, func(t: float) -> Vector3: return Vector3((t - 0.5) * L, 0.22 * s, 0),
+		func(_t: float, _th: float) -> float: return 0.025 * s, Color(0.78, 0.62, 0.42))
+	var veg := [Color(0.85, 0.2, 0.15), Color(0.3, 0.6, 0.2), Color(0.95, 0.75, 0.6)]
+	for i in 6:
+		var x := (i / 5.0 - 0.5) * L * 0.75
+		var meat := i % 2 == 0
+		var c: Color = oc if meat else veg[(i / 2) % 3]
+		b.mat(0.55 if meat else 0.3, 0.8 if meat else 0.2)
+		var keep := b.xf
+		b.at(Vector3(x, 0.22 * s, 0), Vector3(0, i * 37.0, 0))
+		_chunk(Vector3(0.36, 0.36, 0.36) * s * (1.1 if meat else 0.9), func(_u: float, _v: float, p: Vector3) -> Color:
+			return _nz(c, p, 0.12, 30.0 / s), 0.5, 0.15, 8, 6)
+		b.xf = keep
+
+
+func _icepop(s: float, oc: Color) -> void:
+	b.mat(0.15, 0.1)
+	b.rbox(Vector3(0, 0.9 * s, 0), Vector3(0.75 * s, 1.4 * s, 0.32 * s), 0.35, func(_u: float, _v: float, p: Vector3) -> Color:
+		return _nz(oc, p, 0.05, 20.0 / s).lerp(oc.lightened(0.4), smoothstep(1.2 * s, 1.6 * s, p.y) * 0.4), 18, 12)
+	b.mat(0.8, 0.2)
+	b.rbox(Vector3(0, 0.12 * s, 0), Vector3(0.14 * s, 0.6 * s, 0.05 * s), 0.3, Color(0.85, 0.72, 0.5), 8, 6)
+
+
 # ================================================================ cut states
 
 static func _citrus_face(rn: float, th: float, p: Vector3, peel: Color, flesh: Color) -> Color:
@@ -2737,6 +2933,22 @@ func _cut(id: String, shape: String, s: float, oc: Color, ic: Color, cut: int) -
 			_bun_half(s, oc, ic, false, id)
 			b.xf = keep * Transform3D(Basis(Vector3.RIGHT, PI), Vector3(1.08 * s, 1.1 * STACK_R, 0))
 			_bun_half(s, oc, ic, true, id)
+			b.xf = keep
+		"hot_dog_bun":
+			var keep := b.xf
+			b.at(Vector3.ZERO, Vector3.ZERO, Vector3.ONE * (s * 2.4 / DOG_L))
+			_hotdog_open(oc, ic)
+			b.xf = keep
+		"bagel":
+			for side in [-1.0, 1.0]:
+				var keep := b.xf
+				b.at(Vector3(side * 1.05 * s, 0, 0), Vector3.ZERO, Vector3(1, 0.5, 1))
+				_bagel(s, ic if side < 0 else oc, ic)
+				b.xf = keep
+		"croissant":
+			var keep := b.xf
+			b.at(Vector3.ZERO, Vector3.ZERO, Vector3(1, 0.7, 1))
+			_croissant(s, oc)
 			b.xf = keep
 		"dough":
 			b.mat(0.85, 0.5)
@@ -2906,6 +3118,11 @@ func _minced(id: String, shape: String, s: float, oc: Color, ic: Color) -> void:
 ## One bite-sized piece of an ingredient at the current transform (toppings, soup bits, fillings).
 func _piece(id: String, sz: float, oc: Color, ic: Color, k: int) -> void:
 	var shape: String = DB.ING[id][2]
+	if DB.is_dust(id):
+		b.mat(0.9, 0.3)
+		b.blob(Vector3.ZERO, Vector3(sz * 0.9, sz * 0.15, sz * 0.9), ic, 8, 4)
+		return
+	id = DB.LOOK.get(id, id)
 	if DB.flag(id, "l") or shape in BOWLS or id in ["tomato_sauce", "salsa", "guacamole", "pesto", "hummus", "mayo", "caramel", "melted_chocolate"]:
 		b.mat(0.15, 0.1)
 		b.blob(Vector3.ZERO, Vector3(sz * 1.3, sz * 0.3, sz * 1.1), ic, 12, 6, func(th: float, _v: float, _d: Vector3) -> float: return 1.0 + 0.15 * sin(th * 3.0 + k))
@@ -2913,7 +3130,7 @@ func _piece(id: String, sz: float, oc: Color, ic: Color, k: int) -> void:
 	match id:
 		"pepperoni", "sausage", "tomato", "cucumber", "zucchini", "banana", "mozzarella", "eggplant", "carrot", "lemon", "lime", "orange", "boiled_egg", "egg":
 			b.mat(0.35, 0.15)
-			_slice(sz, sz * 0.28, _face_fn(id, Color(DB.ING[id][3]), Color(DB.ING[id][4])), oc, Callable(), 16, 4)
+			_slice(sz, sz * 0.28, _face_fn(id, oc, ic), oc, Callable(), 16, 4)
 		"mushroom":
 			b.mat(0.5, 0.2)
 			_slice(sz, sz * 0.25, _face_fn(id, oc, ic), oc, func(th: float) -> float: return 1.0 if sin(th) > -0.1 else 0.45, 16, 4)
@@ -3008,6 +3225,9 @@ func _sauce_on(ic: Color, base: Dictionary) -> void:
 func _layer(id: String, cut: int, oc: Color, ic: Color) -> void:
 	var R := STACK_R
 	var shape: String = DB.ING[id][2]
+	var real_id := id
+	if DB.LOOK.has(id) and not DB.flag(id, "l") and id != "mayonnaise":
+		id = DB.LOOK[id]
 	match id:
 		"lettuce", "spinach", "cabbage", "basil":
 			b.mat(0.45, 0.3)
@@ -3088,7 +3308,7 @@ func _layer(id: String, cut: int, oc: Color, ic: Color) -> void:
 				b.tube(16, 6, func(t: float) -> Vector3: return c + Vector3(cos(t * TAU), 0, sin(t * TAU)) * R * 0.4 + Vector3(0, 0.008 + i * 0.004, 0),
 					func(_t: float, _th: float) -> float: return 0.008, oc, 0.8)
 		_:
-			if DB.flag(id, "l") or shape in BOWLS or id in ["tomato_sauce", "salsa", "guacamole", "pesto", "hummus", "mayo", "ketchup", "mustard", "jam", "honey", "peanut_butter", "caramel", "melted_chocolate"]:
+			if DB.flag(real_id, "l") or shape in BOWLS or DB.is_topping(real_id) or real_id in ["mayo", "jam", "peanut_butter", "caramel", "melted_chocolate"]:
 				b.mat(0.12, 0.1)
 				var o := float(id.hash() % 100)
 				b.dsolid(R * 0.85, func(rn: float, _th: float) -> float: return 0.008 * (1.0 - pow(rn, 4.0)) + 0.003,
@@ -3096,7 +3316,7 @@ func _layer(id: String, cut: int, oc: Color, ic: Color) -> void:
 					func(_f: int, _rn: float, _th: float, p: Vector3) -> Color: return _nz(ic, p, 0.05, 60.0), 32, 4,
 					func(th: float) -> float: return 1.0 + 0.18 * pow(maxf(0.0, sin(th * 5.0 + o)), 3.0))
 			else:
-				_fit_leaf(id, cut, R * 2.1, R * 0.6)
+				_fit_leaf(real_id, cut, R * 2.1, R * 0.6)
 
 
 ## Builds another leaf's normal model and merges it in, scaled to fit w x h with its base at y=0.
@@ -3138,24 +3358,72 @@ func _wrap_shell(oc: Color, taco: bool) -> void:
 
 # ================================================================ combos
 
-const BASE_SHAPES := ["pizza", "pancakes", "cake", "steamed_rice", "cooked_pasta", "cooked_noodles",
-	"toast", "mashed_potato", "pie", "porridge", "tortilla_chips", "fries", "nori", "french_toast",
-	"bread_loaf", "ice_cream", "yogurt", "hot_chocolate", "smoothie", "milkshake", "juice", "lemonade"]
+const BASE_SHAPES := ["pizza", "pancakes", "waffle", "cake", "cheesecake", "brownies", "steamed_rice", "cooked_quinoa",
+	"cooked_couscous", "cooked_pasta", "cooked_penne", "cooked_macaroni", "cooked_noodles", "cooked_rice_noodles",
+	"toast", "mashed_potato", "hash_browns", "pie", "quiche", "porridge", "overnight_oats", "dal", "tortilla_chips",
+	"crackers", "fries", "sweet_potato_fries", "nori", "french_toast", "bread_loaf", "ice_cream", "frozen_yogurt",
+	"yogurt", "hot_chocolate", "smoothie", "milkshake", "juice", "lemonade", "custard"]
+const STACK_BASES := ["bun", "brioche_bun", "english_muffin", "bagel", "croissant", "crumpet"]
+
+
+## Sandwich-like builds (buns, sliced bread, wraps) keep their sauces inside as layers.
+static func has_frame(ls: Array) -> bool:
+	for l in ls:
+		var id: String = l["id"]
+		if id in STACK_BASES or id in ["hot_dog_bun", "tortilla", "pita", "naan"] or (id in ["bread", "bread_loaf", "baguette"] and int(l.get("cut", 0)) > 0):
+			return true
+	return false
+
+
+## Leaves drawn ON the food (seasoning, styled sauce) rather than as part of it.
+static func is_top(l: Dictionary, framed: bool) -> bool:
+	if framed:
+		return l.get("sstyle", "") == "side"
+	return l.has("sstyle") or DB.is_dust(l["id"])
 
 
 func build_combo(ls: Array) -> void:
+	var tops := []
+	var rest := []
+	var framed := has_frame(ls)
+	for l in ls:
+		if is_top(l, framed):
+			tops.append(l)
+		else:
+			rest.append(l)
+	if rest.is_empty():
+		rest = tops
+		tops = []
+	_combo_body(rest)
+	if not tops.is_empty():
+		top_coat(tops, 1.0)
+
+
+func _combo_body(ls: Array) -> void:
+	if ls.size() == 1:
+		_leaf(ls[0])
+		return
 	var stack_base := -1
 	var wrap := -1
+	var dog := -1
 	for i in ls.size():
 		var id: String = ls[i]["id"]
-		if id == "bun" or ((id == "bread" or id == "bread_loaf") and int(ls[i].get("cut", 0)) > 0):
+		var cut := int(ls[i].get("cut", 0))
+		if id == "hot_dog_bun" and dog < 0:
+			dog = i
+		elif id in STACK_BASES or (id in ["bread", "bread_loaf"] and cut > 0):
 			stack_base = i
-		elif id == "tortilla" and wrap < 0:
+		elif id == "baguette" and cut > 0 and dog < 0:
+			dog = i
+		elif id in ["tortilla", "pita", "naan"] and wrap < 0:
 			wrap = i
-	if stack_base >= 0 and ls.size() > 1:
+	if dog >= 0:
+		_hotdog(ls, dog)
+		return
+	if stack_base >= 0:
 		_stack(ls, stack_base)
 		return
-	if wrap >= 0 and ls.size() > 1:
+	if wrap >= 0:
 		_wrap(ls, wrap)
 		return
 	var liquid := 0
@@ -3163,7 +3431,7 @@ func build_combo(ls: Array) -> void:
 		var id: String = l["id"]
 		if int(l.get("cut", 0)) >= 3 or DB.flag(id, "l") or (l.get("cook", "") == "boil" and not DB.flag(id, "n")):
 			liquid += 1
-	if liquid * 2 >= ls.size() and ls.size() > 1:
+	if liquid * 2 >= ls.size():
 		_soup(ls)
 		return
 	_pile(ls)
@@ -3173,23 +3441,271 @@ func _place(m: Mesh, d, tr: Transform3D) -> MeshInstance3D:
 	return _inst(m, d, tr)
 
 
+## Where a filling goes in a burger: greens, tomato, meat, cheese, bacon, onion/pickle, sauce.
+static func _layer_rank(l: Dictionary) -> float:
+	var id: String = l["id"]
+	if id in ["mayo", "mayonnaise", "aioli", "garlic_butter", "butter", "cream_cheese"]:
+		return 0.5
+	if DB.is_topping(id):
+		return 6.5
+	match DB.LOOK.get(id, id):
+		"lettuce", "spinach", "cabbage", "basil": return 1.0
+		"tomato", "avocado", "cucumber": return 2.0
+		"cheese", "parmesan", "mozzarella", "tofu": return 4.0
+		"bacon", "ham": return 5.0
+		"onion", "jam": return 6.0
+	if DB.ING[id][1] in ["meat", "fish", "protein"] or id in ["patty", "falafel", "fried_egg", "poached_egg", "meatballs", "hash_browns"]:
+		return 3.0
+	return 5.5
+
+
 func _stack(ls: Array, bi: int) -> void:
 	var base: Dictionary = ls[bi]
 	var m := leaf_mesh(base, "bun_bot")
 	var ab := m.get_aabb()
 	_place(m, base, Transform3D(Basis.IDENTITY, Vector3(0, -ab.position.y, 0)))
 	var y := ab.size.y
+	var others := []
 	for i in ls.size():
-		if i == bi:
-			continue
-		var l: Dictionary = ls[i]
+		if i != bi:
+			others.append(ls[i])
+	var order := range(others.size())
+	order.sort_custom(func(a, c): return _layer_rank(others[a]) < _layer_rank(others[c]) \
+		or (_layer_rank(others[a]) == _layer_rank(others[c]) and a < c))
+	var k := 0
+	for oi in order:
+		var l: Dictionary = others[oi]
 		var lm := leaf_mesh(l, "layer")
 		var lb := lm.get_aabb()
-		_place(lm, l, Transform3D(Basis(Vector3.UP, i * 0.9), Vector3(0, y - lb.position.y - lb.size.y * 0.12, 0)))
+		_place(lm, l, Transform3D(Basis(Vector3.UP, k * 0.9), Vector3(0, y - lb.position.y - lb.size.y * 0.12, 0)))
 		y += lb.size.y * 0.88
+		k += 1
 	var tm := leaf_mesh(base, "bun_top")
 	var tb := tm.get_aabb()
 	_place(tm, base, Transform3D(Basis.IDENTITY, Vector3(0, y - tb.position.y - 0.002, 0)))
+
+
+const DOG_L := 0.2
+
+
+## Hot dog: split bun, the sausage lying in the groove, toppings along it, sauce zig-zagged on top.
+func _hotdog(ls: Array, di: int) -> void:
+	var bun: Dictionary = ls[di]
+	var bm := leaf_mesh(bun, "dog_open")
+	_place(bm, bun, Transform3D.IDENTITY)
+	var bb := bm.get_aabb()
+	var groove := bb.position.y + bb.size.y * 0.42
+	var top := groove
+	var main_done := false
+	var sauces := []
+	var j := 0
+	for i in ls.size():
+		if i == di:
+			continue
+		var l: Dictionary = ls[i]
+		var id: String = l["id"]
+		if DB.is_topping(id) and not DB.is_dust(id):
+			sauces.append(l)
+			continue
+		if not main_done and (DB.ING[id][1] in ["meat", "fish", "protein"] or id in ["falafel", "meatballs", "patty"]):
+			main_done = true
+			var m := leaf_mesh(l)
+			var ab := m.get_aabb()
+			var long := maxf(ab.size.x, ab.size.z)
+			var sc := DOG_L * 1.08 / maxf(long, 0.001)
+			var basis := Basis.from_scale(Vector3.ONE * sc)
+			if ab.size.z > ab.size.x:
+				basis = Basis(Vector3.UP, PI * 0.5) * basis
+			var tr := Transform3D(basis, Vector3.ZERO)
+			var c := tr * ab.get_center()
+			tr.origin = Vector3(-c.x, groove - (tr * ab.position).y - ab.size.y * sc * 0.25, -c.z)
+			_place(m, l, tr)
+			top = maxf(top, groove + ab.size.y * sc * 0.75)
+			continue
+		_place(leaf_mesh(l, "bits%d" % (30 + j % 10)), l, Transform3D(Basis.from_scale(Vector3(1.4, 1, 0.7)), Vector3(0, top - 0.004 + j * 0.004, 0)))
+		j += 1
+	for si in sauces.size():
+		var l: Dictionary = sauces[si]
+		var pts := []
+		for p in 11:
+			var t := float(p) / 10.0
+			pts.append(Vector2((t - 0.5) * DOG_L * 0.95, (0.012 if p % 2 == 0 else -0.012) + si * 0.004))
+		var g := Models.new(null)
+		g.begin("dogsauce")
+		g._stroke_flat(pts, top + 0.004 + si * 0.003, Color(DB.ING[l["id"]][4]), 0.0045)
+		_inst(g.finish(), l)
+
+
+# ---------------------------------------------------------------- toppings: seasoning & sauce ON the food
+
+## Highest surface point grid of everything built so far under root.
+func _heightmap() -> Dictionary:
+	var G := 32
+	var pts := PackedVector3Array()
+	for c in root.get_children():
+		var mi := c as MeshInstance3D
+		if mi == null or mi.mesh == null:
+			continue
+		for si in mi.mesh.get_surface_count():
+			for p in (mi.mesh.surface_get_arrays(si)[Mesh.ARRAY_VERTEX] as PackedVector3Array):
+				pts.append(mi.transform * p)
+	var hm := {"G": G, "ok": not pts.is_empty()}
+	if pts.is_empty():
+		hm.merge({"x0": -0.1, "z0": -0.1, "sx": 0.2, "sz": 0.2, "floor": 0.0, "g": PackedFloat32Array()})
+		return hm
+	var mn := pts[0]
+	var mx := pts[0]
+	for p in pts:
+		mn = mn.min(p)
+		mx = mx.max(p)
+	var grid := PackedFloat32Array()
+	grid.resize(G * G)
+	grid.fill(-1e9)
+	var sx := maxf(mx.x - mn.x, 0.001)
+	var sz := maxf(mx.z - mn.z, 0.001)
+	for p in pts:
+		var gi := clampi(int((p.z - mn.z) / sz * G), 0, G - 1) * G + clampi(int((p.x - mn.x) / sx * G), 0, G - 1)
+		grid[gi] = maxf(grid[gi], p.y)
+	hm.merge({"x0": mn.x, "z0": mn.z, "sx": sx, "sz": sz, "floor": mn.y, "g": grid})
+	return hm
+
+
+static func _hm_at(hm: Dictionary, x: float, z: float) -> float:
+	var G: int = hm["G"]
+	if not hm["ok"]:
+		return 0.0
+	var gx := int((x - hm["x0"]) / hm["sx"] * G)
+	var gz := int((z - hm["z0"]) / hm["sz"] * G)
+	if gx < -1 or gz < -1 or gx > G or gz > G:
+		return -1e9
+	var g: PackedFloat32Array = hm["g"]
+	var h := -1e9
+	for dz in range(-1, 2):
+		for dx in range(-1, 2):
+			h = maxf(h, g[clampi(gz + dz, 0, G - 1) * G + clampi(gx + dx, 0, G - 1)])
+	return h
+
+
+## Draws seasonings and sauces on top of what is already built. k scales plate-space
+## paths (and sizes) into this root's local space.
+func top_coat(tops: Array, k: float) -> void:
+	var hm := _heightmap()
+	var cx: float = hm["x0"] + hm["sx"] * 0.5
+	var cz: float = hm["z0"] + hm["sz"] * 0.5
+	var hx: float = hm["sx"] * 0.36
+	var hz: float = hm["sz"] * 0.36
+	for i in tops.size():
+		var l: Dictionary = tops[i]
+		var id: String = l["id"]
+		var col := Color(DB.ING[id][4])
+		var style: String = l.get("sstyle", "dust" if DB.is_dust(id) else "drizzle")
+		var g := Models.new(null)
+		g.begin("top|%s|%d" % [id, i])
+		g.rng.seed = i * 7919 + id.hash()
+		match style:
+			"dust":
+				g._specks(hm, id, col, k)
+			"side":
+				var dip := Models.new(null)
+				dip.begin("dip")
+				dip._bowl_food(0.045 * k, col, "liquid" if DB.flag(id, "l") else "thick", id)
+				g.b.append(dip.b, Transform3D(Basis.IDENTITY, Vector3(hm["x0"] + hm["sx"] + 0.05 * k, hm["floor"], cz)))
+			"dollop":
+				var y := _hm_at(hm, cx, cz)
+				g.b.mat(0.15, 0.2)
+				g.b.blob(Vector3(cx, y + 0.008 * k, cz), Vector3(0.022, 0.012, 0.02) * k, col, 14, 8,
+					func(th: float, v: float, _d: Vector3) -> float: return 1.0 + 0.12 * sin(th * 4.0 + v * 3.0))
+			_:
+				var strokes := []
+				if l.has("path") and not (l["path"] as Array).is_empty():
+					for st in l["path"]:
+						var pts := []
+						for p in st:
+							pts.append(Vector2(p[0], p[1]) * k)
+						strokes.append(pts)
+				else:
+					strokes = _preset_strokes(style, cx, cz, hx, hz)
+				for st in strokes:
+					g._stroke_on(hm, st, col, (0.0035 if style != "spiral" else 0.003) * k)
+		if not g.b.empty():
+			_inst(g.finish(), l)
+
+
+static func _preset_strokes(style: String, cx: float, cz: float, hx: float, hz: float) -> Array:
+	var out := []
+	match style:
+		"zigzag":
+			var pts := []
+			for p in 9:
+				pts.append(Vector2(cx + (p / 8.0 * 2.0 - 1.0) * hx, cz + (0.7 if p % 2 == 0 else -0.7) * hz))
+			out.append(pts)
+		"spiral":
+			var pts := []
+			for p in 40:
+				var t := p / 39.0
+				var a := t * TAU * 2.5
+				pts.append(Vector2(cx + cos(a) * hx * (0.15 + 0.85 * t), cz + sin(a) * hz * (0.15 + 0.85 * t)))
+			out.append(pts)
+		_: # drizzle: three loose wavy lines
+			for w in 3:
+				var pts := []
+				for p in 14:
+					var t := p / 13.0
+					pts.append(Vector2(cx + (t * 2.0 - 1.0) * hx, cz + ((w - 1) * 0.55 + 0.18 * sin(t * 9.0 + w)) * hz))
+				out.append(pts)
+	return out
+
+
+func _specks(hm: Dictionary, id: String, col: Color, k: float) -> void:
+	b.mat(0.8, 0.2)
+	var n := 110 if id != "salt" else 70
+	for i in n:
+		var a := rng.randf() * TAU
+		var r := sqrt(rng.randf()) * 0.46
+		var x: float = hm["x0"] + hm["sx"] * (0.5 + cos(a) * r)
+		var z: float = hm["z0"] + hm["sz"] * (0.5 + sin(a) * r)
+		var y := _hm_at(hm, x, z)
+		if y < -1e8:
+			continue
+		var c := col
+		match id:
+			"sprinkles": c = Color.from_hsv(rng.randf(), 0.7, 1.0)
+			"black_pepper": c = Color(0.1, 0.09, 0.08).lightened(rng.randf() * 0.2)
+			"salt", "sugar", "icing_sugar": c = Color(0.97, 0.97, 0.98)
+			_: c = _nz(col, Vector3(x, y, z), 0.3, 300.0)
+		var sz := (0.0016 + rng.randf() * 0.0016) * k
+		if id == "sprinkles":
+			b.rbox(Vector3(x, y + sz * 0.5, z), Vector3(sz * 3.0, sz, sz), 0.6, c, 5, 3)
+		else:
+			b.blob(Vector3(x, y + sz * 0.4, z), Vector3(sz, sz * 0.55, sz), c, 5, 3)
+
+
+## A sauce line laid over the food's top surface.
+func _stroke_on(hm: Dictionary, pts: Array, col: Color, r: float) -> void:
+	if pts.size() < 2:
+		if pts.size() == 1:
+			var p: Vector2 = pts[0]
+			b.mat(0.1, 0.1, 0.5)
+			b.blob(Vector3(p.x, maxf(_hm_at(hm, p.x, p.y), hm["floor"]) + r, p.y), Vector3(r * 2.0, r, r * 2.0), col, 10, 6)
+		return
+	var p3 := []
+	for p in pts:
+		var h := _hm_at(hm, p.x, p.y)
+		p3.append(Vector3(p.x, (h if h > -1e8 else hm["floor"]) + r * 0.7, p.y))
+	b.mat(0.08, 0.1, 0.5)
+	b.tube(maxi(6, p3.size() * 3), 6, func(t: float) -> Vector3: return _path(p3, t),
+		func(t: float, _th: float) -> float: return r * clampf(minf(t, 1.0 - t) * 30.0, 0.35, 1.0),
+		func(_u: float, _v: float, p: Vector3) -> Color: return _nz(col, p, 0.05, 90.0), 0.55)
+
+
+## Flat sauce line at a fixed height (hot dog zig-zag).
+func _stroke_flat(pts: Array, y: float, col: Color, r: float) -> void:
+	var p3 := []
+	for p in pts:
+		p3.append(Vector3(p.x, y, p.y))
+	b.mat(0.08, 0.1, 0.5)
+	b.tube(p3.size() * 4, 6, func(t: float) -> Vector3: return _path(p3, t),
+		func(t: float, _th: float) -> float: return r * clampf(minf(t, 1.0 - t) * 30.0, 0.35, 1.0), col, 0.55)
 
 
 func _wrap(ls: Array, wi: int) -> void:
