@@ -461,6 +461,7 @@ func _gen(d: Dictionary, variant: String) -> void:
 	var ic := Color(ing[4])
 	var s: float = ing[5] * S * size_fix(id)
 	var cut: int = int(d.get("cut", 0))
+	_pie_closed = id == "pie" and d.has("flavor") and DB.ING[d["flavor"]][1] != "fruit"
 	if d.has("flavor"):
 		var fc := Color(DB.ING[d["flavor"]][4])
 		if id in ["smoothie", "juice", "milkshake", "pie", "cake", "muffins", "donuts", "porridge", "yogurt", "ice_cream",
@@ -2398,17 +2399,23 @@ func _pizza(s: float, oc: Color, ic: Color, cut: bool) -> void:
 			b.leaf(p, Vector3(cos(a + 1.5), 0.05, sin(a + 1.5)), 0.4 * s, 0.25 * s, _leafcol(Color(0.25, 0.55, 0.2), Color(0.15, 0.4, 0.12), 0.05), 0.05, 0.05, 0.3, 0.0, 0.45, 4, 5)
 
 
+## Savoury fillings get a closed, domed lid with steam vents; fruit gets a lattice.
+var _pie_closed := false
+
+
 func _pie(s: float, oc: Color, ic: Color, cut: bool) -> void:
 	var R := 1.2 * s
-	var Hf := 0.42 * s
+	var Hf := 0.62 * s
+	var dome := (0.26 if _pie_closed else 0.14) * s
 	var sp := 0.42 * s
+	var closed := _pie_closed
 	var lattice := func(p: Vector3) -> float:
 		var gx := absf(fposmod(p.x + sp * 0.5, sp) - sp * 0.5)
 		var gz := absf(fposmod(p.z, sp) - sp * 0.5)
 		return maxf(1.0 - smoothstep(0.07 * s, 0.1 * s, gx), 1.0 - smoothstep(0.07 * s, 0.1 * s, gz))
 	if not cut:
 		b.mat(0.3, 0.0, 0.0, 0.8)
-		b.lathe([Vector2(0, 0), Vector2(0.85 * R, 0), Vector2(1.05 * R, Hf * 0.8), Vector2(1.12 * R, Hf * 0.82)], METAL, 32)
+		b.lathe([Vector2(0, 0), Vector2(0.85 * R, 0), Vector2(1.0 * R, Hf * 0.9), Vector2(1.06 * R, Hf * 0.93)], METAL, 32)
 	var n := 6 if cut else 1
 	for k in n:
 		var th0 := TAU * k / n + (0.035 if cut else 0.0)
@@ -2419,19 +2426,38 @@ func _pie(s: float, oc: Color, ic: Color, cut: bool) -> void:
 		var mid := (th0 + th1) * 0.5
 		var keep := b.xf
 		b.at(Vector3(cos(mid), 0, sin(mid)) * (0.06 * R if cut else 0.0))
-		b.mat(0.6, 0.5)
+		b.mat(0.45 if closed else 0.6, 0.5)
 		b.dsolid(R * 1.02, func(rn: float, th: float) -> float:
 				var p := Vector3(cos(th) * rn * R, 0, sin(th) * rn * R)
-				var rim := smoothstep(0.84, 0.9, rn) * (0.1 * s + 0.04 * s * absf(sin(th * 16.0)))
-				return Hf + 0.04 * s * lattice.call(p) * float(rn < 0.88) + rim - 0.1 * s * pow(rn, 40.0),
-			func(rn: float, _th: float) -> float: return 0.02 * s + 0.2 * s * pow(rn, 6.0),
+				# crimped rim: a raised, fluted edge all the way round
+				var rim := smoothstep(0.82, 0.9, rn) * (0.08 * s + 0.05 * s * absf(sin(th * 22.0)))
+				var top := Hf + dome * (1.0 - smoothstep(0.0, 0.86, rn) * smoothstep(0.0, 0.86, rn))
+				if not closed:
+					top += 0.04 * s * lattice.call(p) * float(rn < 0.86)
+				return top + rim - 0.12 * s * pow(rn, 40.0),
+			func(rn: float, _th: float) -> float: return 0.02 * s + 0.24 * s * pow(rn, 6.0),
 			func(f: int, rn: float, _th: float, p: Vector3) -> Color:
 				var crust := _nz(oc, p, 0.1, 12.0 / s)
 				if f == 3:
-					return ic.darkened(0.1) if p.y > 0.1 * s and p.y < Hf - 0.02 * s and rn < 0.88 else crust
-				if f != 0 or rn > 0.86:
+					# cut face: filling between the base and the lid
+					return ic.darkened(0.15) if p.y > 0.12 * s and p.y < Hf + dome * 0.4 and rn < 0.86 else crust
+				if f != 0 or rn > 0.84:
 					return crust
-				return crust.lightened(0.1).lerp(_nz(ic, p, 0.12, 15.0 / s), 1.0 - lattice.call(p)), 48, 12, Callable(), th0, th1)
+				if closed:
+					# egg-washed lid: golden in the middle, darker toward the rim
+					return crust.lightened(0.08).lerp(crust.darkened(0.12), rn)
+				return crust.lightened(0.1).lerp(_nz(ic, p, 0.12, 15.0 / s), 1.0 - lattice.call(p)), 48, 14, Callable(), th0, th1)
+		b.xf = keep
+	if closed and not cut:
+		# three steam slits showing the filling, set into the dome
+		var rn := 0.3
+		var y := Hf + dome * (1.0 - pow(smoothstep(0.0, 0.86, rn), 2.0)) - 0.01 * s
+		var keep := b.xf
+		b.mat(0.7, 0.2)
+		for k in 3:
+			var a := TAU * k / 3.0 + 0.5
+			b.at(Vector3(cos(a), 0, sin(a)) * rn * R * 1.02 + Vector3(0, y, 0), Vector3(0, -rad_to_deg(a), 0), Vector3.ONE, keep)
+			b.rbox(Vector3.ZERO, Vector3(0.3 * R, 0.05 * s, 0.06 * R), 0.3, ic.darkened(0.35), 10, 6)
 		b.xf = keep
 
 

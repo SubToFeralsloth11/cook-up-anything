@@ -454,6 +454,9 @@ const SHORT := {
 	"bbq_sauce": "BBQ", "hot_sauce": "Hot", "sweet_chili": "Sweet Chili", "kidney_beans": "Bean",
 	"black_beans": "Black Bean", "green_beans": "Green Bean", "brioche_bun": "Brioche",
 	"gummy_bears": "Gummy", "white_chocolate": "White Chocolate", "cocoa": "Cocoa",
+	"cherry": "Cherry", "raspberry": "Raspberry", "grapes": "Grape", "peas": "Pea", "mussels": "Mussel",
+	"anchovies": "Anchovy", "almonds": "Almond", "walnuts": "Walnut", "cashews": "Cashew", "peanuts": "Peanut",
+	"raisins": "Raisin", "chickpeas": "Chickpea", "lentils": "Lentil",
 }
 
 const TABS := [
