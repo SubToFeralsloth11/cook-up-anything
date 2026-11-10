@@ -29,6 +29,8 @@ var panels := {}
 var book_text: RichTextLabel
 var book_search: LineEdit
 var book_title: Label
+var pantry_text: RichTextLabel
+var pantry_search: LineEdit
 var card: PanelContainer
 var card_vbox: VBoxContainer
 var confetti: CPUParticles2D
@@ -90,6 +92,7 @@ func _ready() -> void:
 	_build_hud()
 	_build_card()
 	_build_book()
+	_build_pantry()
 	_build_menu()
 	_build_pause()
 	_build_results()
@@ -237,7 +240,7 @@ func _build_hud() -> void:
 	toast_lbl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	toast_lbl.modulate.a = 0.0
 	hud.add_child(toast_lbl)
-	var help := _label("E / Left click  grab & place      F / Right click  chop, whisk, blend      Q  throw      Tab  recipes      Shift  run      Esc  pause", 13, Color(1, 1, 1, 0.55), body_font(), 4)
+	var help := _label("E / Left click  grab & place      F / Right click  chop, whisk, blend      Q  throw      Tab  recipes      I  ingredients      Shift  run      Esc  pause", 13, Color(1, 1, 1, 0.55), body_font(), 4)
 	help.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	help.position = Vector2(18, -30)
 	hud.add_child(help)
@@ -588,6 +591,7 @@ func _build_book() -> void:
 	book_search.custom_minimum_size = Vector2(300, 42)
 	book_search.text_changed.connect(func(_s): _fill_book())
 	head.add_child(book_search)
+	head.add_child(_button("Ingredients", open_pantry, 17, 140))
 	head.add_child(_button("Close", close_modal, 17, 110))
 	var where := _label(WHERE, 13, Color(1, 1, 1, 0.6))
 	where.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -601,6 +605,8 @@ func _build_book() -> void:
 	book_text.add_theme_font_override("bold_font", bold_font())
 	book_text.add_theme_font_size_override("normal_font_size", 15)
 	book_text.add_theme_font_size_override("bold_font_size", 20)
+	book_text.meta_underlined = false
+	book_text.meta_clicked.connect(_on_book_link)
 	v.add_child(book_text)
 
 
@@ -617,7 +623,7 @@ func _fill_book() -> void:
 		if q != "" and not nm.to_lower().contains(q) and not body.to_lower().contains(q):
 			continue
 		var got := found.has(str(k))
-		out += "[b][color=%s]%s[/color][/b]%s\n" % ["#8fe39a" if got else "#ffd08a", nm, "   [color=#8fe39a][font_size=13]COOKED[/font_size][/color]" if got else ""]
+		out += "[b][color=%s]%s[/color][/b]%s    [url=teach:%d][color=#6dff8a][font_size=14]Teach me[/font_size][/color][/url]\n" % ["#8fe39a" if got else "#ffd08a", nm, "   [color=#8fe39a][font_size=13]COOKED[/font_size][/color]" if got else "", k]
 		out += "[color=#ece4d6]%s[/color]\n" % body
 		for h in lines[1]:
 			out += "[color=#b8a8e8][font_size=13]      %s[/font_size][/color]\n" % h
@@ -629,6 +635,83 @@ func open_book() -> void:
 	book_search.text = ""
 	_fill_book()
 	open_modal("book")
+
+
+func _on_book_link(meta: Variant) -> void:
+	var s := str(meta)
+	game.sfx.play("click")
+	if s.begins_with("teach:"):
+		game.teach(int(s.substr(6)))
+	elif s.begins_with("where:"):
+		game.show_where(s.substr(6))
+
+
+# ================================================================ ingredient list
+
+const CAT_NAMES := {"veg": "Vegetables", "fruit": "Fruit", "meat": "Meat", "fish": "Fish", "protein": "Protein",
+	"dairy": "Dairy", "grain": "Bread, Grains & Pasta", "sauce": "Sauces & Condiments", "spice": "Spices & Herbs",
+	"sweet": "Sweets", "made": "Ready-Made"}
+
+
+func _build_pantry() -> void:
+	var v := _center_panel("pantry", Vector2(900, 650))
+	var head := HBoxContainer.new()
+	head.add_theme_constant_override("separation", 12)
+	v.add_child(head)
+	var t := _label("Ingredients", 30, ACCENT, title_font())
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(t)
+	pantry_search = LineEdit.new()
+	pantry_search.placeholder_text = "Search ingredients"
+	pantry_search.custom_minimum_size = Vector2(300, 42)
+	pantry_search.text_changed.connect(func(_s): _fill_pantry())
+	head.add_child(pantry_search)
+	head.add_child(_button("Close", close_modal, 17, 110))
+	v.add_child(_label("Click  Show me where  and green arrows lead you to it.", 14, Color(1, 0.9, 0.75, 0.8)))
+	pantry_text = RichTextLabel.new()
+	pantry_text.bbcode_enabled = true
+	pantry_text.custom_minimum_size = Vector2(0, 520)
+	pantry_text.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	pantry_text.add_theme_font_override("normal_font", body_font())
+	pantry_text.add_theme_font_override("bold_font", bold_font())
+	pantry_text.add_theme_font_size_override("normal_font_size", 16)
+	pantry_text.add_theme_font_size_override("bold_font_size", 20)
+	pantry_text.meta_underlined = false
+	pantry_text.meta_clicked.connect(_on_book_link)
+	v.add_child(pantry_text)
+
+
+func _fill_pantry() -> void:
+	var q := pantry_search.text.strip_edges().to_lower()
+	var have := {}
+	for s in game.kitchen.sources:
+		have[(s as Source).id] = true
+	var groups := {}
+	for id in have:
+		var nm: String = DB.ING[id][0]
+		if q != "" and not nm.to_lower().contains(q):
+			continue
+		var c: String = DB.ING[id][1]
+		if not groups.has(c):
+			groups[c] = []
+		groups[c].append([nm, id])
+	var out := ""
+	for c in CAT_NAMES:
+		if not groups.has(c):
+			continue
+		var list: Array = groups[c]
+		list.sort()
+		out += "[b][color=#ffd08a]%s[/color][/b]\n" % CAT_NAMES[c]
+		for e in list:
+			out += "   [color=#ece4d6]%s[/color]    [url=where:%s][color=#6dff8a]Show me where[/color][/url]\n" % [e[0], e[1]]
+		out += "\n"
+	pantry_text.text = out if out != "" else "[color=#aaaaaa]Nothing matches.[/color]"
+
+
+func open_pantry() -> void:
+	pantry_search.text = ""
+	_fill_pantry()
+	open_modal("pantry")
 
 
 # ================================================================ menus
@@ -681,6 +764,7 @@ func _build_pause() -> void:
 	v.add_child(t)
 	v.add_child(_button("Resume", close_modal, 21, 380))
 	v.add_child(_button("Recipe Book", open_book, 21, 380))
+	v.add_child(_button("Ingredients", open_pantry, 21, 380))
 	var qb := _button("", func(): game.toggle_quality(), 21, 380)
 	quality_buttons.append(qb)
 	v.add_child(qb)
