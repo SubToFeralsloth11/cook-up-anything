@@ -8,8 +8,12 @@ const NAMES := {"trash": "Bin", "sink": "Sink", "board": "Chopping Board", "bowl
 	"blender": "Blender", "pan": "Frying Pan", "pot": "Pot", "fryer": "Deep Fryer", "oven": "Oven",
 	"plates": "Plates", "serve": "Serving Pass", "grill": "Grill", "microwave": "Microwave",
 	"toaster": "Toaster", "fridge": "Fridge & Freezer"}
-const CAP := {"sink": 3, "board": 1, "bowl": 8, "blender": 6, "pan": 6, "pot": 8, "fryer": 4, "oven": 6,
-	"grill": 6, "microwave": 4, "toaster": 2, "fridge": 6}
+## How many things each station holds; NO_LIMIT = as much as you like (it piles up).
+const NO_LIMIT := -1
+const CAP := {"sink": 6, "board": 1, "bowl": NO_LIMIT, "blender": 16, "pan": 10, "pot": NO_LIMIT, "fryer": 8, "oven": 12,
+	"grill": 10, "microwave": 6, "toaster": 2, "fridge": 24}
+## Items in one ring before the next ring piles on top.
+const RING := 6
 const SPREAD := {"sink": 0.1, "bowl": 0.07, "blender": 0.03, "pan": 0.075, "pot": 0.065, "fryer": 0.07, "oven": 0.13,
 	"grill": 0.1, "microwave": 0.07, "toaster": 0.0, "fridge": 0.1}
 const ITEM_SCALE := {"bowl": 0.8, "blender": 0.55, "pot": 0.62, "fryer": 0.75, "pan": 0.85, "sink": 0.9,
@@ -669,7 +673,7 @@ func accepts(f: Food) -> String:
 		return ""
 	if kind == "blender" and running:
 		return "Wait for the blender!"
-	if contents.size() >= CAP[kind]:
+	if is_full():
 		return "The %s is full" % title()
 	match kind:
 		"sink":
@@ -730,19 +734,28 @@ func add_food(f: Food) -> void:
 			game.sfx.play_at("place_metal", at, -3.0)
 
 
+func is_full() -> bool:
+	var cap: int = CAP[kind]
+	return cap != NO_LIMIT and contents.size() >= cap
+
+
 func _layout() -> void:
 	var n := contents.size()
+	var per := mini(n, RING)
 	var r: float = SPREAD.get(kind, 0.0)
 	var base: float = ITEM_SCALE.get(kind, 1.0)
-	var sc := base if n <= 1 else base * clampf(1.2 / sqrt(n), 0.45, 1.0)
-	if n > 3:
+	var sc := base if n <= 1 else base * clampf(1.2 / sqrt(per), 0.45, 1.0)
+	if per > 3:
 		r *= 1.15
 	for i in n:
 		var f: Food = contents[i]
-		var target := Vector3.ZERO
-		if n > 1:
-			var a := TAU * i / n + 0.4
-			target = Vector3(cos(a) * r, 0.0, sin(a) * r)
+		# full rings pile up in layers, each turned a little so they sit in the gaps
+		var layer := i / RING
+		var cnt := mini(RING, n - layer * RING)
+		var target := Vector3(0.0, layer * 0.035 * sc, 0.0)
+		if cnt > 1:
+			var a := TAU * (i % RING) / cnt + 0.4 + layer * 0.5
+			target += Vector3(cos(a) * r, 0.0, sin(a) * r)
 		var tw := f.create_tween()
 		tw.set_parallel(true)
 		tw.tween_property(f, "position", target, 0.25).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
