@@ -601,7 +601,7 @@ const RULES := [
 	["bake", ["pastry|puff_pastry", "beaten_egg", "*"], "quiche", 2],
 	["bake", ["pastry|puff_pastry", "beaten_egg"], "quiche", -1],
 	["bake", ["puff_pastry|pastry", "sausage|pork_mince"], "sausage_roll", -1],
-	["bake", ["dough|pastry", "#fruit|#meat|#fish|pumpkin|mushroom"], "pie", 1],
+	["bake", ["dough|pastry|puff_pastry", "#fruit|#meat|#fish|pumpkin|mushroom"], "pie", 1],
 	["bake", ["cake_batter", "cocoa"], "brownies", -1],
 	["bake", ["oats", "butter", "honey|golden_syrup|maple_syrup"], "flapjacks", -1],
 	["bake", ["cake_batter", "*"], "cake", 1],
@@ -1822,8 +1822,19 @@ static func cook_time(d: Dictionary, method: String) -> float:
 ## Returns {made: new items, rest: untouched items}.
 static func apply_rules(method: String, items: Array) -> Dictionary:
 	init()
-	var pool := items.duplicate()
+	var pool := []
 	var made := []
+	# a combined lump (e.g. pastry + steak put together first) still transforms:
+	# run the rules on its parts and keep the leftovers stuck together
+	for d in items:
+		if d["id"] != "mix":
+			pool.append(d)
+			continue
+		var sub := apply_rules(method, d["parts"])
+		if (sub["made"] as Array).is_empty():
+			pool.append(d)
+		else:
+			made.append(merge(sub["made"] + sub["rest"], d.get("how", "mix")))
 	for r in _rules:
 		if r["m"] != method:
 			continue
@@ -1924,7 +1935,7 @@ const BASES := {
 	"tortilla_chips": "{} Nachos", "crackers": "{} Crackers", "mashed_potato": "{} & Mash", "pie": "{} Pie",
 	"smoothie": "{} Smoothie", "milkshake": "{} Milkshake", "juice": "{} Juice", "yogurt": "{} Yogurt Bowl",
 	"bread_loaf": "{} Loaf", "donuts": "{} Donuts", "brownies": "{} Brownies", "cheesecake": "{} Cheesecake",
-	"hash_browns": "{} Hash", "puff_pastry": "{} Pastry", "pastry": "{} Tart", "lettuce": "{} Salad",
+	"hash_browns": "{} Hash", "puff_pastry": "{} Pastry", "pastry": "{} Pie", "lettuce": "{} Salad",
 	"kale": "{} Kale Salad", "spinach": "{} Spinach Salad",
 }
 
