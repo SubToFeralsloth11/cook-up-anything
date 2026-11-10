@@ -72,6 +72,11 @@ func _init() -> void:
 			ls.append(l)
 		var info := DB.identify(ls)
 		check(info["recipe"] >= 0, "recipe not reachable: %s -> got '%s'" % [rec["name"], info["name"]])
+		# a recipe may only ask for the toaster with things the toaster accepts
+		for sp in rec["specs"]:
+			if "toast" in sp["m"]:
+				for a in sp["alts"]:
+					check(a["id"] in Station.TOASTABLE, "%s asks to toast %s, which won't fit in the toaster" % [rec["name"], a["id"] if a["id"] != "" else str(a["cats"])])
 	# transformation rules
 	var r := DB.apply_rules("mix", [leaf("flour"), leaf("egg", 1), leaf("milk")])
 	check(r["made"].size() == 1 and r["made"][0]["id"] == "batter", "flour+egg+milk should mix into batter")
