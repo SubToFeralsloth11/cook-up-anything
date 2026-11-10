@@ -15,7 +15,7 @@ var items: Node3D
 var clock: Node3D
 var menu_cam := Camera3D.new()
 var mode := "menu"
-var save := {"found": {}, "best": 0, "served": 0}
+var save := {"found": {}, "best": 0, "served": 0, "quality_high": true}
 var money := 0
 var served := 0
 var misses := 0
@@ -51,6 +51,7 @@ func _ready() -> void:
 	ui.game = self
 	add_child(ui)
 	_load()
+	_apply_quality()
 	show_menu()
 
 
@@ -117,10 +118,10 @@ func start(m: String) -> void:
 		items.add_child(p)
 		p.global_position = Vector3(x, Kitchen.TOP + 0.02, 0.6)
 	if m == "sandbox":
-		ui.toast("Sandbox! Grab ingredients from the Fridge or Pantry and invent something.")
+		ui.toast("Sandbox! Grab anything off the shelves, crates and fridge, then invent something.")
 	else:
 		ui.toast("Dinner Rush! Read the tickets, cook, plate and serve at the hatch.")
-	sfx.play("fanfare", -6.0)
+	sfx.play("fanfare", -10.0)
 
 
 func _clear_world() -> void:
@@ -280,16 +281,6 @@ func _end_shift() -> void:
 
 # ================================================================ actions
 
-func pick_ingredient(id: String) -> void:
-	if player.held:
-		player.drop_held()
-	var f := Food.make(DB.new_leaf(id))
-	items.add_child(f)
-	f.global_position = player.hand.global_position
-	player.hold(f)
-	ui.close_modal()
-
-
 func serve(b: RigidBody3D) -> void:
 	var ls: Array = (b as Plate).leaves() if b is Plate else DB.leaves((b as Food).data)
 	if ls.is_empty():
@@ -337,7 +328,7 @@ func serve(b: RigidBody3D) -> void:
 	ui.show_card(j, is_new, reward)
 	var hatch := _station("serve")
 	hatch.bump()
-	sfx.play("bell")
+	sfx.play_at("bell", hatch.global_position, 0.0, 0.02)
 	# fly the dish out through the hatch
 	b.reparent(items, true)
 	b.set_carried(true)
@@ -354,6 +345,18 @@ func _station(kind: String) -> Station:
 		if (s as Station).kind == kind:
 			return s
 	return null
+
+
+func toggle_quality() -> void:
+	save["quality_high"] = not bool(save["quality_high"])
+	_apply_quality()
+	_save()
+
+
+func _apply_quality() -> void:
+	var high := bool(save["quality_high"])
+	kitchen.set_quality(high)
+	ui.set_quality_label(high)
 
 
 func toast(msg: String) -> void:

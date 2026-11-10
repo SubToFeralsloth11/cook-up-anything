@@ -4,7 +4,7 @@ extends RigidBody3D
 
 var data: Dictionary
 var model: Node3D
-var tints: Array = []
+var tints: Array = [] # Models tint records: [MeshInstance3D, leaf, last br, last ch, last mud]
 var bottom := 0.0
 var shape := CollisionShape3D.new()
 var _name := ""
@@ -52,9 +52,11 @@ func rebuild() -> void:
 	_name = ""
 
 
+## Pushes live cooking/washing state to the shader. Called every frame by
+## stations: only changed instance parameters are sent, nothing is rebuilt.
 func refresh_tint() -> void:
 	for t in tints:
-		(t[0] as StandardMaterial3D).albedo_color = Models.tinted(t[1], t[2])
+		Models.apply_tint(t)
 
 
 func display_name() -> String:

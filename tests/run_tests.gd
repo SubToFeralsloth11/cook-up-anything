@@ -147,10 +147,21 @@ func _runtime() -> void:
 	check(plate.display_name() == "Cheeseburger", "plate should read Cheeseburger, got " + plate.display_name())
 	main.serve(plate)
 	check(main.save["found"].size() >= 1, "serving a named dish records a discovery")
-	# full player flow: pantry -> sink -> board -> fryer -> plate -> serve
+	# full player flow: market crate -> sink -> board -> fryer -> plate -> serve
 	var pl: Player = main.player
-	main.pick_ingredient("potato")
-	check(pl.held is Food, "picking from the pantry puts food in hand")
+	var crate: Source = null
+	for s in main.kitchen.sources:
+		if s.id == "potato":
+			crate = s
+	pl.target = {"kind": "source", "node": crate}
+	pl.interact()
+	check(pl.held is Food and (pl.held as Food).data["id"] == "potato", "grabbing from the potato crate puts a potato in hand")
+	var ids := {}
+	for s in main.kitchen.sources:
+		ids[s.id] = true
+	for id in DB.ING:
+		if not DB.flag(id, "i"):
+			check(ids.has(id), "ingredient %s has a place in the kitchen" % id)
 	var sink: Station = main._station("sink")
 	pl.target = {"kind": "station", "node": sink}
 	pl.interact()

@@ -11,6 +11,27 @@ var tints: Array = []
 var bottom := 0.0
 var _name := ""
 
+static var _plate_mesh: ArrayMesh
+
+
+## One-draw-call plate: glazed ceramic with a blue rim band.
+static func plate_mesh() -> ArrayMesh:
+	if _plate_mesh:
+		return _plate_mesh
+	var b := MeshGen.new()
+	b.mat(0.12, 0.0, 0.0)
+	var blue := Color(0.35, 0.62, 0.88)
+	var white := Color(0.97, 0.97, 0.95)
+	var pts := Models._cr([Vector2(0, 0.004), Vector2(0.1, 0.0), Vector2(0.115, 0.0), Vector2(0.12, 0.006), Vector2(0.13, 0.012),
+		Vector2(0.17, 0.022), Vector2(0.18, 0.028), Vector2(0.176, 0.031), Vector2(0.165, 0.026), Vector2(0.13, 0.017),
+		Vector2(0.11, 0.014), Vector2(0, 0.014)], 2)
+	b.lathe(pts, func(_u: float, _v: float, p: Vector3) -> Color:
+		var r := Vector2(p.x, p.z).length()
+		return blue if r > 0.168 and p.y > 0.022 else white, 48)
+	_plate_mesh = ArrayMesh.new()
+	b.commit(_plate_mesh, Models.food_material())
+	return _plate_mesh
+
 
 func _init() -> void:
 	collision_layer = 2
@@ -32,10 +53,9 @@ func _init() -> void:
 	col.shape = cs
 	col.position.y = 0.02
 	add_child(col)
-	var ceramic := Models.smat(Color(0.98, 0.98, 0.96), 0.2)
-	Models.solid(self, "cyl", ceramic, Vector3(0, 0.008, 0), Vector3(0.3, 0.016, 0.3))
-	Models.solid(self, "torus", ceramic, Vector3(0, 0.02, 0), Vector3(0.36, 0.08, 0.36))
-	Models.solid(self, "torus", Models.smat(Color(0.35, 0.65, 0.9), 0.3), Vector3(0, 0.024, 0), Vector3(0.355, 0.03, 0.355))
+	var mi := MeshInstance3D.new()
+	mi.mesh = plate_mesh()
+	add_child(mi)
 	add_to_group("plate")
 
 
