@@ -167,6 +167,17 @@ func interact() -> void:
 				if not p.can_add():
 					game.toast("That plate is piled high enough")
 					return
+				var hf: Food = held
+				if is_topping(hf) and not p.items.is_empty():
+					if DB.is_dust(hf.data["id"]):
+						var l := topping_leaf(hf)
+						l["sstyle"] = "dust"
+						p.add_data(l)
+						game.sfx.play_at("whisk", p.global_position, -6.0)
+						game.toast("Sprinkled %s over it" % DB.ING[hf.data["id"]][0])
+					else:
+						game.ui.open_sauce_menu(p, hf)
+					return
 				var f := release()
 				p.add_data((f as Food).data)
 				f.queue_free()
@@ -174,16 +185,34 @@ func interact() -> void:
 			else:
 				_place_on_surface()
 		"food":
+			var tf: Food = node
 			if held is Plate:
 				var p: Plate = held
 				if not p.can_add():
 					game.toast("That plate is piled high enough")
 					return
-				p.add_data((node as Food).data)
-				node.queue_free()
+				p.add_data(tf.data)
+				tf.queue_free()
 				game.sfx.play("plate", -8.0)
+			elif is_topping(held):
+				var l := topping_leaf(held)
+				l["sstyle"] = "dust" if DB.is_dust(l["id"]) else "drizzle"
+				tf.data = DB.merge([tf.data, l], "top")
+				tf.rebuild()
+				tf.mark_changed()
+				tf.pop(1.1)
+				game.sfx.play_at("whisk" if l["sstyle"] == "dust" else "splash", tf.global_position, -8.0)
 			else:
-				_place_on_surface()
+				# put one food onto another: they become one assembled thing (bun + sausage = hot dog)
+				var f := release() as Food
+				DB.portion(f.data)
+				tf.data = DB.merge([tf.data, f.data], "stack")
+				f.queue_free()
+				tf.rebuild()
+				tf.mark_changed()
+				tf.pop(1.15)
+				game.sfx.play_at("plate", tf.global_position, -8.0)
+				game.float_text(tf.global_position + Vector3(0, 0.25, 0), tf.display_name(), Color(1, 0.9, 0.6))
 		"surface":
 			_place_on_surface()
 		_:
@@ -248,6 +277,16 @@ func _station_holding(st: Station) -> void:
 				game.sfx.play("plate", -8.0)
 				return
 			var f: Food = held
+			if is_topping(held) and not st.contents.is_empty() and st.kind in ["pan", "pot", "fryer", "oven", "grill", "microwave", "bowl", "blender", "fridge"]:
+				# pour / sprinkle some in, keep the bottle
+				if st.contents.size() >= Station.CAP[st.kind]:
+					game.toast("The %s is full" % st.title())
+					return
+				var pf := Food.make(topping_leaf(f))
+				game.items.add_child(pf)
+				pf.global_position = f.global_position
+				st.add_food(pf)
+				return
 			var why := st.accepts(f)
 			if why != "":
 				game.toast(why)
@@ -255,6 +294,22 @@ func _station_holding(st: Station) -> void:
 				return
 			release()
 			st.add_food(f)
+
+
+## Is the held thing something you pour, squeeze or sprinkle (and keep holding)?
+func is_topping(b: RigidBody3D) -> bool:
+	if not b is Food:
+		return false
+	var id: String = (b as Food).data["id"]
+	return id != "mix" and DB.is_topping(id)
+
+
+## A serving of the held topping (the bottle/jar stays in your hand).
+func topping_leaf(b: Food) -> Dictionary:
+	var l: Dictionary = b.data.duplicate(true)
+	if DB.is_pack(l["id"]):
+		l["portion"] = true
+	return l
 
 
 func _place_on_surface() -> void:

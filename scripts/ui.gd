@@ -6,7 +6,7 @@ const ACCENT := Color(1.0, 0.74, 0.36)
 const GOOD := Color(0.47, 0.9, 0.55)
 const BAD := Color(1.0, 0.45, 0.4)
 const INK := Color(0.16, 0.12, 0.09)
-const WHERE := "Where things are:  Produce - market crates by the door   |   Meat, fish & dairy - glass fridge   |   Dry goods, bread & sauces - pantry shelves   |   Spices - shelf by the blender"
+const WHERE := "Where things are:  Produce - market crates by the door   |   Meat & fish - FRESH fridge   |   Dairy - DAIRY fridge by the door   |   Bread, pasta & flour - pantry   |   Tins, spices, oils, sauces & sweets - DRY GOODS shelves   |   Basics - spice shelf by the blender"
 
 static var _fonts := {}
 
@@ -93,6 +93,9 @@ func _ready() -> void:
 	_build_menu()
 	_build_pause()
 	_build_results()
+	_build_cut()
+	_build_pads()
+	_build_sauce()
 	confetti = CPUParticles2D.new()
 	confetti.emitting = false
 	confetti.one_shot = true
@@ -314,11 +317,23 @@ func update_prompt(p: Player) -> void:
 			title = fd.display_name()
 			if fd.needs_wash():
 				sub = "Muddy - rinse it in the sink"
-			e = "Pick up" if held == null else ("Add to plate" if held is Plate else "Place")
+			if held == null:
+				e = "Pick up"
+			elif held is Plate:
+				e = "Add to plate"
+			elif p.is_topping(held):
+				e = "Sprinkle on" if DB.is_dust((held as Food).data["id"]) else "Drizzle on"
+			else:
+				e = "Put on top (combine)"
 		"plate":
 			var pl: Plate = node
 			title = pl.display_name()
-			e = "Pick up plate" if held == null else ("Add to plate" if held is Food else "Place")
+			if held == null:
+				e = "Pick up plate"
+			elif held is Food and p.is_topping(held) and not pl.items.is_empty():
+				e = "Season it" if DB.is_dust((held as Food).data["id"]) else "Add sauce..."
+			else:
+				e = "Add to plate" if held is Food else "Place"
 		"station":
 			var st: Station = node
 			title = st.title()
@@ -334,11 +349,14 @@ func update_prompt(p: Player) -> void:
 					"serve": e = "Serve"
 					"plates": e = ""
 					_:
-						var why := st.accepts(held)
-						if why == "":
-							e = "Put in"
+						if p.is_topping(held) and not st.contents.is_empty() and st.method != "" or (p.is_topping(held) and st.kind in ["bowl", "blender"] and not st.contents.is_empty()):
+							e = "Sprinkle in" if DB.is_dust((held as Food).data["id"]) else "Pour some in"
 						else:
-							sub = why
+							var why := st.accepts(held)
+							if why == "":
+								e = "Put in"
+							else:
+								sub = why
 			else:
 				match st.kind:
 					"trash": e = "Scrape plate" if not (held as Plate).items.is_empty() else "Bin plate"
@@ -706,6 +724,341 @@ func show_menu(stats: String) -> void:
 
 func hide_menu() -> void:
 	panels["menu"].visible = false
+
+
+# ================================================================ cutting & saucing
+
+var cut_station: Station
+var cut_pad: Pad
+var cut_info: Label
+var sauce_pad: Pad
+var sauce_plate: Plate
+var sauce_food: Food
+
+
+func _build_cut() -> void:
+	var v := _center_panel("cut", Vector2(460, 0))
+	var t := _label("How do you want to cut it?", 26, ACCENT, title_font())
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(t)
+	for opt in [["Slice", "slice", "Rounds and strips (crisps, salads, burgers)"], ["Dice", "dice", "Neat cubes (stews, salsa, nuggets)"],
+			["Mince", "mince", "Tiny bits (sauces, garlic, herbs)"], ["Free cut with the mouse", "free", "Draw your own cuts - every line is a knife stroke"]]:
+		var b := _button(opt[0], func():
+			var st := cut_station
+			close_modal()
+			if st:
+				st.choose_style(opt[1]), 20, 420)
+		b.tooltip_text = opt[2]
+		v.add_child(b)
+		var hint := _label(opt[2], 13, Color(1, 1, 1, 0.55))
+		hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		v.add_child(hint)
+	v.add_child(_button("Cancel", close_modal, 17, 420))
+
+
+func open_cut_menu(st: Station) -> void:
+	cut_station = st
+	open_modal("cut")
+
+
+func _build_pads() -> void:
+	var v := _center_panel("freecut", Vector2(560, 0))
+	var t := _label("Free cut - drag across the food to slice", 24, ACCENT, title_font())
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(t)
+	cut_pad = Pad.new()
+	cut_pad.custom_minimum_size = Vector2(520, 420)
+	cut_pad.stroke_done.connect(func(): _on_cut_stroke())
+	v.add_child(cut_pad)
+	cut_info = _label("Pieces: 1", 18, Color(1, 1, 1), bold_font())
+	cut_info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(cut_info)
+	var h := HBoxContainer.new()
+	h.alignment = BoxContainer.ALIGNMENT_CENTER
+	h.add_theme_constant_override("separation", 10)
+	v.add_child(h)
+	h.add_child(_button("Done", func():
+		var st := cut_station
+		var n := cut_pad.pieces()
+		close_modal()
+		if st and n >= 2:
+			st.apply_free_cut(n), 18, 150))
+	h.add_child(_button("Start over", func():
+		cut_pad.clear_strokes()
+		cut_info.text = "Pieces: 1", 18, 150))
+	h.add_child(_button("Cancel", close_modal, 18, 150))
+	var sv := _center_panel("saucepad", Vector2(560, 0))
+	var st2 := _label("Draw your sauce on the plate", 24, ACCENT, title_font())
+	st2.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	sv.add_child(st2)
+	sauce_pad = Pad.new()
+	sauce_pad.custom_minimum_size = Vector2(520, 420)
+	sauce_pad.sauce = true
+	sv.add_child(sauce_pad)
+	var sh := HBoxContainer.new()
+	sh.alignment = BoxContainer.ALIGNMENT_CENTER
+	sh.add_theme_constant_override("separation", 10)
+	sv.add_child(sh)
+	sh.add_child(_button("Done", func():
+		var path := sauce_pad.world_strokes()
+		close_modal()
+		if not path.is_empty():
+			_apply_sauce("free", path), 18, 150))
+	sh.add_child(_button("Start over", func(): sauce_pad.clear_strokes(), 18, 150))
+	sh.add_child(_button("Cancel", close_modal, 18, 150))
+
+
+func open_free_cut(st: Station, f: Food) -> void:
+	cut_station = st
+	cut_pad.setup(f, Color(0.55, 0.4, 0.26))
+	cut_info.text = "Pieces: 1"
+	open_modal("freecut")
+
+
+func _on_cut_stroke() -> void:
+	if cut_station:
+		cut_station.knife_chop()
+	var n := cut_pad.pieces()
+	cut_info.text = "Pieces: %d%s" % [n, "   (that's minced!)" if n >= 18 else ""]
+
+
+func _build_sauce() -> void:
+	var v := _center_panel("sauce", Vector2(460, 0))
+	var t := _label("How should it go on?", 26, ACCENT, title_font())
+	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(t)
+	for opt in [["Drizzle", "drizzle"], ["Zig-zag", "zigzag"], ["Swirl", "spiral"], ["Dollop on top", "dollop"],
+			["On the side (dip)", "side"], ["Draw it yourself", "free"]]:
+		v.add_child(_button(opt[0], func():
+			if opt[1] == "free":
+				sauce_pad.setup(sauce_plate, Color(DB.ING[sauce_food.data["id"]][4]))
+				open_modal("saucepad")
+			else:
+				close_modal()
+				_apply_sauce(opt[1], []), 20, 420))
+	v.add_child(_button("Cancel", close_modal, 17, 420))
+
+
+func open_sauce_menu(p: Plate, f: Food) -> void:
+	sauce_plate = p
+	sauce_food = f
+	open_modal("sauce")
+
+
+func _apply_sauce(style: String, path: Array) -> void:
+	if not is_instance_valid(sauce_plate) or not is_instance_valid(sauce_food):
+		return
+	var l: Dictionary = (game.player as Player).topping_leaf(sauce_food)
+	l["sstyle"] = style
+	if not path.is_empty():
+		l["path"] = path
+	sauce_plate.add_data(l)
+	game.sfx.play_at("splash", sauce_plate.global_position, -8.0)
+
+
+## Top-down drawing pad over a picture of the food (or plate) built from its vertex colours.
+class Pad:
+	extends Control
+	signal stroke_done
+	var sauce := false
+	var tex: ImageTexture
+	var occ := PackedByteArray() # 1 where there's food
+	var cut := PackedByteArray()
+	var N := 72
+	var x0 := 0.0
+	var z0 := 0.0
+	var span := 0.3
+	var strokes: Array = [] # Array of PackedVector2Array in pad pixels
+	var cur := PackedVector2Array()
+	var ink := Color(1, 1, 1)
+
+	func _init() -> void:
+		mouse_filter = Control.MOUSE_FILTER_STOP
+
+	func setup(node: Node3D, line_col: Color) -> void:
+		ink = line_col
+		strokes.clear()
+		cur = PackedVector2Array()
+		var inv := node.global_transform.affine_inverse()
+		var pts := PackedVector3Array()
+		var cols := PackedColorArray()
+		var tris := PackedInt32Array()
+		for mi in node.find_children("*", "MeshInstance3D", true, false):
+			var m := (mi as MeshInstance3D).mesh
+			if m == null or not (mi as MeshInstance3D).is_visible_in_tree():
+				continue
+			var tr := inv * (mi as MeshInstance3D).global_transform
+			for si in m.get_surface_count():
+				var arr := m.surface_get_arrays(si)
+				var vs: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+				var cs = arr[Mesh.ARRAY_COLOR]
+				var ix = arr[Mesh.ARRAY_INDEX]
+				var base := pts.size()
+				for k in vs.size():
+					pts.append(tr * vs[k])
+					cols.append(cs[k] if cs != null and k < (cs as PackedColorArray).size() else Color(0.9, 0.9, 0.9))
+				if ix != null:
+					for k in (ix as PackedInt32Array):
+						tris.append(base + k)
+				else:
+					for k in vs.size():
+						tris.append(base + k)
+		var mn := Vector3(-0.1, 0, -0.1)
+		var mx := Vector3(0.1, 0, 0.1)
+		if not pts.is_empty():
+			mn = pts[0]
+			mx = pts[0]
+			for p in pts:
+				mn = mn.min(p)
+				mx = mx.max(p)
+		if sauce:
+			mn = Vector3(-0.19, 0, -0.19)
+			mx = Vector3(0.19, 0, 0.19)
+		span = maxf(mx.x - mn.x, mx.z - mn.z) * 1.15
+		x0 = (mn.x + mx.x) * 0.5 - span * 0.5
+		z0 = (mn.z + mx.z) * 0.5 - span * 0.5
+		var hi := PackedFloat32Array()
+		hi.resize(N * N)
+		hi.fill(-1e9)
+		var img := Image.create(N, N, false, Image.FORMAT_RGBA8)
+		img.fill(Color(0, 0, 0, 0))
+		occ.resize(N * N)
+		occ.fill(0)
+		# fill every triangle's footprint, keeping the highest surface per cell
+		for t in range(0, tris.size() - 2, 3):
+			var a := pts[tris[t]]
+			var bb := pts[tris[t + 1]]
+			var c := pts[tris[t + 2]]
+			var pa := Vector2((a.x - x0) / span * N, (a.z - z0) / span * N)
+			var pb := Vector2((bb.x - x0) / span * N, (bb.z - z0) / span * N)
+			var pc := Vector2((c.x - x0) / span * N, (c.z - z0) / span * N)
+			var lo := pa.min(pb).min(pc)
+			var hi2 := pa.max(pb).max(pc)
+			var y := maxf(a.y, maxf(bb.y, c.y))
+			var col := Color(cols[tris[t]], 1.0)
+			var area := (pb - pa).cross(pc - pa)
+			for gz in range(maxi(0, int(lo.y)), mini(N - 1, int(hi2.y)) + 1):
+				for gx in range(maxi(0, int(lo.x)), mini(N - 1, int(hi2.x)) + 1):
+					var q := Vector2(gx + 0.5, gz + 0.5)
+					var inside := absf(area) < 0.0001
+					if not inside:
+						var w0 := (pb - q).cross(pc - q) / area
+						var w1 := (pc - q).cross(pa - q) / area
+						inside = w0 >= -0.05 and w1 >= -0.05 and 1.0 - w0 - w1 >= -0.05
+					if not inside and int(lo.x) == int(hi2.x) and int(lo.y) == int(hi2.y):
+						inside = true
+					if inside:
+						var gi := gz * N + gx
+						if y > hi[gi]:
+							hi[gi] = y
+							img.set_pixel(gx, gz, col)
+							occ[gi] = 1
+		tex = ImageTexture.create_from_image(img)
+		cut.resize(N * N)
+		cut.fill(0)
+		queue_redraw()
+
+	func _side() -> float:
+		return minf(size.x, size.y)
+
+	func _origin() -> Vector2:
+		return (size - Vector2.ONE * _side()) * 0.5
+
+	func _gui_input(e: InputEvent) -> void:
+		if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT:
+			if e.pressed:
+				cur = PackedVector2Array([e.position])
+			elif cur.size() > 1:
+				strokes.append(cur)
+				_rasterize(cur)
+				cur = PackedVector2Array()
+				stroke_done.emit()
+			else:
+				if sauce and cur.size() == 1:
+					strokes.append(cur)
+				cur = PackedVector2Array()
+			queue_redraw()
+			accept_event()
+		elif e is InputEventMouseMotion and cur.size() > 0:
+			if e.position.distance_to(cur[cur.size() - 1]) > 4.0:
+				cur.append(e.position)
+				queue_redraw()
+			accept_event()
+
+	func _cell(px: Vector2) -> Vector2i:
+		var q := (px - _origin()) / _side() * N
+		return Vector2i(int(q.x), int(q.y))
+
+	func _rasterize(s: PackedVector2Array) -> void:
+		for i in range(1, s.size()):
+			var a := s[i - 1]
+			var b := s[i]
+			var steps := int(a.distance_to(b) / (_side() / N * 0.5)) + 1
+			for k in steps + 1:
+				var c := _cell(a.lerp(b, float(k) / steps))
+				if c.x >= 0 and c.y >= 0 and c.x < N and c.y < N:
+					cut[c.y * N + c.x] = 1
+
+	## Connected pieces of food left after the knife strokes.
+	func pieces() -> int:
+		var seen := PackedByteArray()
+		seen.resize(N * N)
+		seen.fill(0)
+		var count := 0
+		for i in N * N:
+			if occ[i] != 1 or cut[i] == 1 or seen[i] == 1:
+				continue
+			var stack := [i]
+			seen[i] = 1
+			var sz := 0
+			while not stack.is_empty():
+				var j: int = stack.pop_back()
+				sz += 1
+				var x := j % N
+				var z := j / N
+				for d in [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]:
+					var ax: int = x + d.x
+					var az: int = z + d.y
+					if ax < 0 or az < 0 or ax >= N or az >= N:
+						continue
+					var k := az * N + ax
+					if occ[k] == 1 and cut[k] == 0 and seen[k] == 0:
+						seen[k] = 1
+						stack.append(k)
+			if sz >= 4:
+				count += 1
+		return maxi(count, 1)
+
+	func clear_strokes() -> void:
+		strokes.clear()
+		cut.fill(0)
+		queue_redraw()
+
+	## Strokes in the node's local x/z (metres), as arrays of [x, z].
+	func world_strokes() -> Array:
+		var out := []
+		for s in strokes:
+			var st := []
+			for p in s:
+				var q: Vector2 = (p - _origin()) / _side()
+				st.append([x0 + q.x * span, z0 + q.y * span])
+			out.append(st)
+		return out
+
+	func _draw() -> void:
+		var o := _origin()
+		var sd := _side()
+		draw_rect(Rect2(o, Vector2.ONE * sd), Color(0.62, 0.45, 0.28) if not sauce else Color(0.2, 0.18, 0.17))
+		if tex:
+			draw_texture_rect(tex, Rect2(o, Vector2.ONE * sd), false)
+		var w := 4.0 if not sauce else 7.0
+		for s in strokes:
+			if s.size() == 1:
+				draw_circle(s[0], w * 1.4, ink)
+			else:
+				draw_polyline(s, ink if sauce else Color(0.95, 0.95, 1.0, 0.9), w, true)
+		if cur.size() > 1:
+			draw_polyline(cur, ink if sauce else Color(1, 1, 1, 0.6), w, true)
 
 
 # ================================================================ modal plumbing
